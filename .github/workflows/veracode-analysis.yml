@@ -3,14 +3,13 @@ name: Veracode Analysis
 on:
   workflow_call:
     inputs:
-      build-id:
-        description: "ID do build"
+      config-path:
         required: true
         type: string
-      project:
-        description: "Nome do repositório (projeto)"
+    secrets:
+      token:
         required: true
-        type: string
+          
 env:
   project: '${{ inputs.project }}' 
 
