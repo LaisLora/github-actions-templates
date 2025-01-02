@@ -12,7 +12,7 @@ on:
           
 env:
   project: '${{ inputs.project }}' 
-  token: ${{ secrets.ACTIONS_DEPLOY_KEY }}
+
 
 jobs:
   veracode-analysis:
