@@ -7,21 +7,13 @@ on:
         description: "Caminho do projeto no repositório"
         required: true
         type: string
-      build-id:
-        description: "ID do build"
-        required: true
-        type: string
-      environment:
-        description: "Ambiente de execução (ex.: dev, hml, master)"
-        required: false
-        type: string
-      namespace:
-        description: "Namespace do projeto"
-        required: false
-        type: string
-      project:
+      project-name:
         description: "Nome do projeto"
         required: true
+        type: string
+      build-id:
+        description: "ID do build"
+        required: false
         type: string
     secrets:
       VERACODE_API_ID:
