@@ -3,21 +3,16 @@ name: Veracode Analysis
 on:
   workflow_call:
     inputs:
-      project-path:
-        description: "Caminho do projeto no repositório"
+      build-id:
+        description: "ID do build"
         required: true
         type: string
-      project-name:
+      project:
         description: "Nome do repositório (projeto)"
         required: true
         type: string
-    secrets:
-      VERACODE_API_ID:
-        required: true
-      VERACODE_API_KEY:
-        required: true
 env:
-  project-name: '${{ github.repository }}' 
+  project: '${{ inputs.project }}' 
 
 jobs:
   veracode-analysis:
@@ -25,12 +20,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          path: ${{ inputs.project-path }}
-
-      - name: Exibir Nome do Projeto
-        run: 'Projeto: ${{ inputs.project-name }}'
-
+        
       - name: Detectar Linguagem do Projeto
         id: detect_language
         run: |
@@ -64,7 +54,7 @@ jobs:
           fi
 
   autopack:
-    needs: detect-and-install
+    needs: veracode-analysis
     runs-on: ubuntu-latest
     steps:
       - name: Baixar e Instalar CLI do Veracode
