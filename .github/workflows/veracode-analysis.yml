@@ -3,19 +3,12 @@ name: Veracode Analysis
 on:
   workflow_call:
     inputs:
-      project-path:
-        description: 'Caminho do projeto no repositório'
+     build-id:
+        description: 'id do projeto'
         required: true
         type: string
-      project-name:
-        description: 'Nome do repositório (projeto)'
-        required: true
-        type: string
-    secrets:
-      VERACODE_API_ID:
-        required: true
-      VERACODE_API_KEY:
-        required: true
+env:
+  project-name: '${{ github.repository }}' 
 
 jobs:
   detect-and-install:
