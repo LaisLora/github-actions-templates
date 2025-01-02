@@ -4,23 +4,17 @@ on:
   workflow_call:
     inputs:
       project-path:
-        description: "Caminho do projeto no repositório"
+        description: 'Caminho do projeto no repositório'
         required: true
         type: string
       project-name:
-        description: "Nome do projeto"
+        description: 'Nome do repositório (projeto)'
         required: true
-        type: string
-      build-id:
-        description: "ID do build"
-        required: false
         type: string
     secrets:
       VERACODE_API_ID:
         required: true
       VERACODE_API_KEY:
-        required: true
-      SRCCLR_API_TOKEN:
         required: true
 
 jobs:
@@ -29,6 +23,11 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          path: ${{ inputs.project-path }}
+
+      - name: Exibir Nome do Projeto
+        run: 'Projeto: ${{ inputs.project-name }}'
 
       - name: Detectar Linguagem do Projeto
         id: detect_language
