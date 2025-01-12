@@ -1,0 +1,71 @@
+name: Veracode Analysis
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: true
+        type: string
+
+jobs:
+  Linguagem-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Detectar Linguagem do Projeto
+        id: detect_language
+        run: |
+          echo "Detectando linguagem do projeto..."
+          cd ${{ inputs.project-path }}
+          if [ -f "pom.xml" ]; then
+            echo "Linguagem detectada: Java (Maven)"
+            echo "language=java" >> $GITHUB_ENV
+            echo "build_tool=maven" >> $GITHUB_ENV
+          elif [ -f "build.gradle" ]; then
+            echo "Linguagem detectada: Java (Gradle)"
+            echo "language=java" >> $GITHUB_ENV
+            echo "build_tool=gradle" >> $GITHUB_ENV
+          elif [ -f "package.json" ]; then
+            echo "Linguagem detectada: Node.js"
+            echo "language=node" >> $GITHUB_ENV
+          elif [ -f "requirements.txt" ]; then
+            echo "Linguagem detectada: Python"
+            echo "language=python" >> $GITHUB_ENV
+          elif ls *.csproj &>/dev/null; then
+            echo "Linguagem detectada: .NET"
+            echo "language=dotnet" >> $GITHUB_ENV
+          else
+            echo "Linguagem não detectada ou não suportada. Abortando."
+            exit 1
+          fi
+
+      - name: Instalar Pré-requisitos
+        run: |
+          echo "Instalando pré-requisitos para a linguagem detectada..."
+          if [ "$language" == "java" ]; then
+            echo "Linguagem: Java"
+            if [ "$build_tool" == "maven" ]; then
+              echo "Ferramenta de build: Maven"
+              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk maven
+            elif [ "$build_tool" == "gradle" ]; then
+              echo "Ferramenta de build: Gradle"
+              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk gradle
+            fi
+          elif [ "$language" == "node" ]; then
+            echo "Linguagem: Node.js"
+            sudo apt-get update && sudo apt-get install -y nodejs npm
+          elif [ "$language" == "python" ]; then
+            echo "Linguagem: Python"
+            sudo apt-get update && sudo apt-get install -y python3 python3-pip
+          elif [ "$language" == "dotnet" ]; then
+            echo "Linguagem: .NET"
+            sudo apt-get update && sudo apt-get install -y dotnet-sdk-6.0
+          else
+            echo "Linguagem desconhecida. Abortando."
+            exit 1
+          fi
+
+      - name: Conclusão
+        run: echo "Configuração concluída com sucesso para a linguagem $language."
