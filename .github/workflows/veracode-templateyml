@@ -1,0 +1,67 @@
+name: Veracode Analysis
+
+on:
+  workflow_call:
+
+jobs:
+  autopack:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Baixar e Instalar CLI do Veracode
+        run: |
+          echo "📥 Baixando e instalando o CLI do Veracode..."
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+
+      - name: Empacotar Artefatos com o CLI do Veracode
+        run: |
+          # Diretório padrão dos artefatos gerados pelo build
+          ARTIFACTS_DIR="${{ github.workspace }}"
+
+          echo "📂 Diretório de artefatos definido como: $ARTIFACTS_DIR"
+          
+          # Validar se o diretório existe e contém arquivos
+          if [ ! -d "$ARTIFACTS_DIR" ] || [ -z "$(ls -A "$ARTIFACTS_DIR")" ]; then
+            echo "❌ Diretório de artefatos inválido ou vazio: $ARTIFACTS_DIR. Abortando."
+            exit 1
+          fi
+
+          # Executar empacotamento diretamente na pasta padrão
+          echo "📦 Empacotando artefatos do diretório $ARTIFACTS_DIR..."
+          ./veracode package --source "$ARTIFACTS_DIR" --type directory --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
+
+          # Validar o pacote gerado (opcional)
+          if [ ! -f "$ARTIFACTS_DIR/analysisPack.zip" ]; then
+            echo "❌ O pacote não foi gerado. Abortando."
+            exit 1
+          fi
+          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/analysisPack.zip"
+
+      - name: Publicar Artefato
+        uses: actions/upload-artifact@v3
+        with:
+          name: analysisPack
+          path: ${{ github.workspace }}/artifacts/analysisPack.zip
+
+  veracode-sast-policy-scan:
+    needs: autopack
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Baixar Artefato
+        uses: actions/download-artifact@v3
+        with:
+          name: analysisPack
+
+      - name: Veracode SAST Policy Scan
+        uses: veracode/veracode-uploadandscan-action@0.2.6
+        with:
+          appname: ${{ github.repository }}
+          createprofile: true
+          filepath: './analysisPack.zip'
+          vid: ${{ secrets.VERACODE_API_ID }}
+          vkey: ${{ secrets.VERACODE_API_KEY }}
+          version: "${{ github.run_id }}"
+          scantimeout: 12
