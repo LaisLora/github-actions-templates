@@ -53,7 +53,7 @@ jobs:
 
           # Executar empacotamento diretamente na pasta padrão
           echo "📦 Empacotando artefatos do diretório $ARTIFACTS_DIR..."
-          ./veracode package --source "$ARTIFACTS_DIR" --type directory --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
+          ./veracode package --source . --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
 
           # Validar o pacote gerado (opcional)
           if [ ! -f "$ARTIFACTS_DIR/artifacts/analysisPack.zip" ]; then
