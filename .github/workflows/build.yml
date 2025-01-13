@@ -2,10 +2,7 @@ name: Veracode Analysis
 
 on:
   workflow_call:
-    inputs:
-      project-path:
-        required: true
-        type: string
+
 
 jobs:
   Linguagem-project:
