@@ -57,17 +57,18 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: analysisPack
-          path: ./artifacts/analysisPack.zip
+          path: ${{ github.workspace }}/artifacts/analysisPack.zip
 
       - name: Validar Pacote Gerado
         run: |
-          if [ -f "./artifacts/analysisPack.zip" ]; then
-            echo "✅ Arquivo encontrado: ./artifacts/analysisPack.zip"
+          ARTIFACT_PATH="${{ github.workspace }}/artifacts/analysisPack.zip"
+          if [ -f "$ARTIFACT_PATH" ]; then
+            echo "✅ Arquivo encontrado: $ARTIFACT_PATH"
           else
-            echo "❌ Arquivo não encontrado. Abortando."
+            echo "❌ Arquivo não encontrado no caminho esperado: $ARTIFACT_PATH. Abortando."
             exit 1
           fi
-
+          
   Veracode_SCA:
     needs: autopack
     runs-on: ubuntu-latest
