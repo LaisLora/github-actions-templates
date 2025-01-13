@@ -1,8 +1,11 @@
-name: Veracode Analysis
+name: Build
 
 on:
-  workflow_call:
-
+  workflow_call: # Permite que outros workflows chamem este
+    inputs:
+      project-path:
+        required: true
+        type: string
 
 jobs:
   Linguagem-project:
