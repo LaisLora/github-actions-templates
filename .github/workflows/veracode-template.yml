@@ -15,7 +15,16 @@ jobs:
           echo "🛠️ Verificando ambiente..."
           uname -a
           echo "✅ Ambiente pronto."
-        
+          
+  Veracode_SCA:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Veracode SCA
+        env:
+          SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }} # Lembrar de criar as credenciais no Secrets
+        run: |
+          curl -sSL 'https://download.sourceclear.com/ci.sh' | bash -s – scan --update-advisor --pull-request --allow-dirty
   
   autopack:
     needs: environment-check
@@ -28,12 +37,12 @@ jobs:
         run: |
           echo "📥 Baixando e instalando o CLI do Veracode..."
           curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-          
+
       - name: Empacotar Artefatos com o CLI do Veracode
         run: |
           # Diretório padrão dos artefatos gerados pelo build
-          ARTIFACTS_DIR="${{ github.workspace }}/artifacts"
-        
+          ARTIFACTS_DIR="${{ github.workspace }}"
+
           echo "📂 Diretório de artefatos definido como: $ARTIFACTS_DIR"
           
           # Validar se o diretório existe e contém arquivos
@@ -44,47 +53,20 @@ jobs:
 
           # Executar empacotamento diretamente na pasta padrão
           echo "📦 Empacotando artefatos do diretório $ARTIFACTS_DIR..."
-          ./veracode package --source . --output $ARTIFACTS_DIR/analysisPack.zip --trust
-          find $ARTIFACTS_DIR -name "*.zip" | while read filename; do unzip -o -d "'dirname "$filename"'" "$filename"; done
-          rm -rf $ARTIFACTS_DIR/*.zip
-          zip analysisPack.zip -r $ARTIFACTS_DIR
-          mv analysisPack.zip $ARTIFACTS_DIR/analysisPack.zip
-          ls -la $ARTIFACTS_DIR/analysisPack.zip
-          fi
+          ./veracode package --source "$ARTIFACTS_DIR" --type directory --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
 
           # Validar o pacote gerado (opcional)
-          if [ ! -f "$ARTIFACTS_DIR/analysisPack.zip" ]; then
+          if [ ! -f "$ARTIFACTS_DIR/artifacts/analysisPack.zip" ]; then
             echo "❌ O pacote não foi gerado. Abortando."
             exit 1
           fi
-          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/analysisPack.zip"
+          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/artifacts/analysisPack.zip"
 
       - name: Publicar Artefato
         uses: actions/upload-artifact@v3
         with:
           name: analysisPack
-          path: analysisPack
-
-      - name: Validar Pacote Gerado
-        run: |
-          ARTIFACT_PATH="${{ github.workspace }}/artifacts/analysisPack.zip"
-          if [ -f "$ARTIFACT_PATH" ]; then
-            echo "✅ Arquivo encontrado: $ARTIFACT_PATH"
-          else
-            echo "❌ Arquivo não encontrado no caminho esperado: $ARTIFACT_PATH. Abortando."
-            exit 1
-          fi
-          
-  Veracode_SCA:
-    needs: autopack
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Veracode SCA
-        env:
-          SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }} # Lembrar de criar as credenciais no Secrets
-        run: |
-          curl -sSL 'https://download.sourceclear.com/ci.sh' | bash -s – scan --update-advisor --pull-request --allow-dirty         
+          path: $ARTIFACTS_DIR/artifacts/analysisPack.zip
 
   veracode-sast-pipeline_scan:
     needs: autopack
@@ -92,13 +74,13 @@ jobs:
     name: veracode pipeline scan
 
     steps:
-      - name: checkout
+      - name: checkout repo
         uses: actions/checkout@v4
       
-      - name: download do artefato
+      - name: get archive
         uses: actions/download-artifact@v3
         with:
-          name: analysisPack
+          name: pacoteVeracode
 
       - name: veracode pipeline-scan
         id: pipeline-scan
