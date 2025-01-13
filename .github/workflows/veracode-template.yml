@@ -28,12 +28,12 @@ jobs:
         run: |
           echo "📥 Baixando e instalando o CLI do Veracode..."
           curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-
+          
       - name: Empacotar Artefatos com o CLI do Veracode
         run: |
           # Diretório padrão dos artefatos gerados pelo build
-          ARTIFACTS_DIR="${{ github.workspace }}"
-
+          ARTIFACTS_DIR="${{ github.workspace }}/artifacts"
+        
           echo "📂 Diretório de artefatos definido como: $ARTIFACTS_DIR"
           
           # Validar se o diretório existe e contém arquivos
@@ -44,20 +44,26 @@ jobs:
 
           # Executar empacotamento diretamente na pasta padrão
           echo "📦 Empacotando artefatos do diretório $ARTIFACTS_DIR..."
-          ./veracode package --source "$ARTIFACTS_DIR" --type directory --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
+          ./veracode package --source . --output $ARTIFACTS_DIR/analysisPack.zip --trust
+          find $ARTIFACTS_DIR -name "*.zip" | while read filename; do unzip -o -d "'dirname "$filename"'" "$filename"; done
+          rm -rf $ARTIFACTS_DIR/*.zip
+          zip analysisPack.zip -r $ARTIFACTS_DIR
+          mv analysisPack.zip $ARTIFACTS_DIR/analysisPack.zip
+          ls -la $ARTIFACTS_DIR/analysisPack.zip
+          fi
 
           # Validar o pacote gerado (opcional)
-          if [ ! -f "/home/runner/work/Verademo2/Verademo2/artifacts/analysisPack.zip/verademo.war" ]; then
+          if [ ! -f "$ARTIFACTS_DIR/analysisPack.zip" ]; then
             echo "❌ O pacote não foi gerado. Abortando."
             exit 1
           fi
-          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/artifacts/analysisPack.zip"
+          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/analysisPack.zip"
 
       - name: Publicar Artefato
         uses: actions/upload-artifact@v3
         with:
           name: analysisPack
-          path: ${{ github.workspace }}/artifacts/analysisPack.zip
+          path: analysisPack
 
       - name: Validar Pacote Gerado
         run: |
