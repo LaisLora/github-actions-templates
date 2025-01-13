@@ -6,6 +6,7 @@ on:
       build-id:
         required: true
         type: string
+
 jobs:
   environment-check:
     runs-on: ubuntu-22.04
@@ -15,17 +16,7 @@ jobs:
           echo "🛠️ Verificando ambiente..."
           uname -a
           echo "✅ Ambiente pronto."
-          
-  Veracode_SCA:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Veracode SCA
-        env:
-          SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }} # Lembrar de criar as credenciais no Secrets
-        run: |
-          curl -sSL 'https://download.sourceclear.com/ci.sh' | bash -s – scan --update-advisor --pull-request --allow-dirty
-  
+        
   autopack:
     needs: environment-check
     runs-on: ubuntu-22.04
@@ -42,32 +33,56 @@ jobs:
         run: |
           # Diretório padrão dos artefatos gerados pelo build
           ARTIFACTS_DIR="${{ github.workspace }}"
-
-          echo "📂 Diretório de artefatos definido como: $ARTIFACTS_DIR"
+          OUTPUT_DIR="$ARTIFACTS_DIR/artifacts"
+          FINAL_ZIP="$OUTPUT_DIR/analysisPack.zip"
           
-          # Validar se o diretório existe e contém arquivos
-          if [ ! -d "$ARTIFACTS_DIR" ] || [ -z "$(ls -A "$ARTIFACTS_DIR")" ]; then
-            echo "❌ Diretório de artefatos inválido ou vazio: $ARTIFACTS_DIR. Abortando."
-            exit 1
-          fi
-
-          # Executar empacotamento diretamente na pasta padrão
+          # Criar diretório para artefatos
+          mkdir -p "$OUTPUT_DIR"
+          echo "📂 Diretório de artefatos definido como: $OUTPUT_DIR"
+          
+          # Empacotar os artefatos gerados pelo CLI do Veracode
           echo "📦 Empacotando artefatos do diretório $ARTIFACTS_DIR..."
-          ./veracode package --source . --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
-
-          # Validar o pacote gerado (opcional)
-          if [ ! -f "$ARTIFACTS_DIR/artifacts/analysisPack.zip" ]; then
-            echo "❌ O pacote não foi gerado. Abortando."
+          ./veracode package --source "$ARTIFACTS_DIR" --output "$OUTPUT_DIR" --trust
+          
+          # Descompactar todos os .zip gerados no OUTPUT_DIR (caso existam)
+          find "$OUTPUT_DIR" -name "*.zip" | while read filename; do
+            echo "Descompactando $filename..."
+            unzip -o "$filename" -d "$(dirname "$filename")"
+          done
+          
+          # Remover os zips intermediários (se houver)
+          rm -rf "$OUTPUT_DIR"/*.zip 
+          
+          # Consolidar todos os arquivos em um único ZIP
+          echo "📂 Consolidando artefatos em um único arquivo ZIP: $FINAL_ZIP..."
+          cd "$OUTPUT_DIR"
+          zip -r "$FINAL_ZIP" ./*
+          
+          # Validar se o arquivo final existe e não está vazio
+          if [ ! -f "$FINAL_ZIP" ] || [ ! -s "$FINAL_ZIP" ]; then
+            echo "❌ Arquivo inválido ou vazio: $FINAL_ZIP. Abortando."
             exit 1
           fi
-          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/artifacts/analysisPack.zip"
+
+          echo "✅ Pacote consolidado gerado com sucesso: $FINAL_ZIP"
 
       - name: Publicar Artefato
         uses: actions/upload-artifact@v3
         with:
+          # Mesmo nome que será baixado nos outros jobs
           name: analysisPack
-          path: $ARTIFACTS_DIR/artifacts/analysisPack.zip
+          path: ${{ github.workspace }}/artifacts/analysisPack.zip
 
+  Veracode_SCA:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Veracode SCA
+        env:
+          SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }} 
+        run: |
+          curl -sSL 'https://download.sourceclear.com/ci.sh' | bash -s – scan --update-advisor --pull-request --allow-dirty
+  
   veracode-sast-pipeline_scan:
     needs: autopack
     runs-on: ubuntu-latest
@@ -80,7 +95,8 @@ jobs:
       - name: get archive
         uses: actions/download-artifact@v3
         with:
-          name: pacoteVeracode
+          name: analysisPack  # Mesmo nome do artifact publicado
+          path: .  # Baixa para o diretório atual
 
       - name: veracode pipeline-scan
         id: pipeline-scan
@@ -88,7 +104,7 @@ jobs:
         with:
           vid: ${{ secrets.VERACODE_API_ID }}
           vkey: ${{ secrets.VERACODE_API_KEY }}
-          file: './analysisPack.zip'
+          file: './analysisPack.zip'  # Arquivo que baixamos
 
   veracode-sast-policy-scan:
     needs: [ autopack, veracode-sast-pipeline_scan ]
@@ -98,6 +114,7 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: analysisPack
+          path: .  # Baixa novamente no diretório atual
 
       - name: Veracode SAST Policy Scan
         uses: veracode/veracode-uploadandscan-action@0.2.6
