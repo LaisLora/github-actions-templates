@@ -80,7 +80,7 @@ jobs:
       - name: get archive
         uses: actions/download-artifact@v3
         with:
-          name: pacoteVeracode
+          name: analysisPack
 
       - name: veracode pipeline-scan
         id: pipeline-scan
