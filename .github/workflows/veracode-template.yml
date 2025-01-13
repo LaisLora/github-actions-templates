@@ -46,7 +46,7 @@ jobs:
           ./veracode package --source "$ARTIFACTS_DIR" --type directory --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
 
           # Validar o pacote gerado (opcional)
-          if [ ! -f "$ARTIFACTS_DIR/artifacts/analysisPack.zip" ]; then
+          if [ ! -f "/home/runner/work/Verademo2/Verademo2/artifacts/analysisPack.zip/" ]; then
             echo "❌ O pacote não foi gerado. Abortando."
             exit 1
           fi
