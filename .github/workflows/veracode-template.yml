@@ -7,8 +7,17 @@ on:
         required: true
         type: string
 jobs:
+  environment-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Verificar Ambiente
+        run: |
+          echo "🛠️ Verificando ambiente..."
+          uname -a
+          echo "✅ Ambiente pronto."
+
   autopack:
-    needs: build
+    needs: environment-check
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
