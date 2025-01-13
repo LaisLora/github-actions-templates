@@ -46,11 +46,11 @@ jobs:
           ./veracode package --source "$ARTIFACTS_DIR" --type directory --output "$ARTIFACTS_DIR/artifacts/analysisPack.zip" --trust
 
           # Validar o pacote gerado (opcional)
-          if [ ! -f "$ARTIFACTS_DIR/analysisPack.zip" ]; then
+          if [ ! -f "$ARTIFACTS_DIR/artifacts/analysisPack.zip" ]; then
             echo "❌ O pacote não foi gerado. Abortando."
             exit 1
           fi
-          echo "✅ Pacote gerado com sucesso: $ARTIFACTS_DIR/analysisPack.zip"
+          echo "✅ Pacote gerado com sucesso: $$ARTIFACTS_DIR/artifacts/analysisPack.zip"
 
       - name: Publicar Artefato
         uses: actions/upload-artifact@v3
