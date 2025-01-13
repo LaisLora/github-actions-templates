@@ -1,8 +1,11 @@
 name: Veracode Analysis
 
 on:
-  workflow_call:
-
+  workflow_call: # Permite ser chamado após o build
+    inputs:
+      build-id:
+        required: true
+        type: string
 jobs:
   autopack:
     needs: build
