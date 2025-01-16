@@ -2,7 +2,11 @@ name: Build
 
 on:
   workflow_call: # Permite que outros workflows chamem este
-
+    inputs:
+      project-path:
+        description: 'Caminho do projeto'
+        required: true
+        type: string
 
 jobs:
   Linguagem-project:
