@@ -31,20 +31,27 @@ jobs:
 
       - name: Empacotar Artefatos com o CLI do Veracode
         run: |
-          # Diretório padrão dos artefatos gerados pelo build
-          ARTIFACTS_DIR="${{ github.workspace }}"
-          OUTPUT_DIR="$ARTIFACTS_DIR/artifacts"
+        
+          BUILD_ID="${{ inputs.build-id }}"
+
+          # Diretório-base do repositório
+          REPO_DIR="${{ github.workspace }}"
+
+          # Diretório final de artefatos, contendo o build-id
+          OUTPUT_DIR="$REPO_DIR/artifacts/${BUILD_ID}"
+          
+          # Caminho do ZIP final
           FINAL_ZIP="$OUTPUT_DIR/analysisPack.zip"
           
-          # Criar diretório para artefatos
+          # Criar o diretório de artefatos (com subpasta do build-id)
           mkdir -p "$OUTPUT_DIR"
           echo "📂 Diretório de artefatos definido como: $OUTPUT_DIR"
           
-          # Empacotar os artefatos gerados pelo CLI do Veracode
-          echo "📦 Empacotando artefatos do diretório $ARTIFACTS_DIR..."
-          ./veracode package --source "$ARTIFACTS_DIR" --output "$OUTPUT_DIR" --trust
+          # Empacotar com o CLI do Veracode
+          echo "📦 Empacotando artefatos do diretório $REPO_DIR..."
+          ./veracode package --source "$REPO_DIR" --output "$OUTPUT_DIR" --trust
           
-          # Descompactar todos os .zip gerados no OUTPUT_DIR (caso existam)
+          # Descompactar qualquer .zip intermediário que o CLI possa ter gerado
           find "$OUTPUT_DIR" -name "*.zip" | while read filename; do
             echo "Descompactando $filename..."
             unzip -o "$filename" -d "$(dirname "$filename")"
