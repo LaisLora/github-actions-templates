@@ -86,7 +86,8 @@ jobs:
           name: analysisPack
           path: |
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip  
+          retention-days: 1
 
   sca:
     runs-on: ubuntu-latest
