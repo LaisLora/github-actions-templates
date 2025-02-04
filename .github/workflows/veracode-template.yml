@@ -61,20 +61,27 @@ jobs:
       - name: Instalar CLI do Veracode e Autopack-Veracode
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-          JAR_FILE=$(find target/ -name "*.jar" | head -n 1)
-
-          if [ -f "$JAR_FILE" ]; then
+          
+          # Tenta encontrar um arquivo WAR e um arquivo JAR na pasta target
+          WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+          JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+          
+          if [ -f "$WAR_FILE" ]; then
+            echo "WAR encontrado: $WAR_FILE"
+            echo "Publicando WAR diretamente..."
+            cp "$WAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
+          elif [ -f "$JAR_FILE" ]; then
             echo "JAR encontrado: $JAR_FILE"
             echo "Publicando JAR diretamente..."
             cp "$JAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
           else
-            echo "Aplicação não é Java, rodando Autopack..."
+            echo "Nenhum WAR ou JAR encontrado. Rodando Autopack..."
             curl -fsS https://tools.veracode.com/veracode-cli/install | sh
             ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
-
+      
             find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" |
             while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
-
+      
             rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
             zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
             mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
