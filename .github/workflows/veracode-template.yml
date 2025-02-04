@@ -61,27 +61,37 @@ jobs:
       - name: Instalar CLI do Veracode e Autopack-Veracode
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-          
-          # Tenta encontrar um arquivo WAR e um arquivo JAR na pasta target
+
+          # Procura por arquivos WAR, JAR ou ZIP na pasta target
           WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
           JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
-          
+          ZIP_FILE=$(find target/ -maxdepth 1 -name "*.zip" | head -n 1)
+
           if [ -f "$WAR_FILE" ]; then
             echo "WAR encontrado: $WAR_FILE"
-            echo "Publicando WAR diretamente..."
+            # Copia o WAR para o diretório de artefatos
             cp "$WAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
+            # Cria um zip contendo o WAR para uso nos scans
+            zip -j ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
+
           elif [ -f "$JAR_FILE" ]; then
             echo "JAR encontrado: $JAR_FILE"
-            echo "Publicando JAR diretamente..."
             cp "$JAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
+            zip -j ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
+
+          elif [ -f "$ZIP_FILE" ]; then
+            echo "ZIP encontrado: $ZIP_FILE"
+            cp "$ZIP_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+
           else
-            echo "Nenhum WAR ou JAR encontrado. Rodando Autopack..."
+            echo "Nenhum WAR, JAR ou ZIP encontrado. Rodando Autopack..."
             curl -fsS https://tools.veracode.com/veracode-cli/install | sh
             ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
-      
+
+            # Descompacta os zips gerados e recompacta em analysisPack.zip
             find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" |
-            while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
-      
+              while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
+
             rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
             zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
             mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
@@ -91,9 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: analysisPack
-          path: |
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip  
+          path: ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
           retention-days: 1
 
   sca:
@@ -129,19 +137,17 @@ jobs:
           VID: ${{ secrets.APIID_VERACODE }}
           VKEY: ${{ secrets.APIKEY_VERACODE }}
         run: |
-          JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
-
-          if [ -f "$JAR_FILE" ]; then
-            echo "Java build detectado. Usando arquivo: $JAR_FILE"
-            java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
-              -vid $VID -vkey $VKEY \
-              --file "$JAR_FILE" --issue_details true --fail_on_severity="Very High, High"
+          # Se o artifact for gerado pelo autopack, usaremos analysisPack.zip
+          if [ -f "analysisPack.zip" ]; then
+            echo "Usando analysisPack.zip para o scan."
+            ARTIFACT="analysisPack.zip"
           else
-            echo "Nenhum JAR encontrado. Usando analysisPack.zip."
-            java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
-              -vid $VID -vkey $VKEY \
-              --file analysisPack.zip --issue_details true --fail_on_severity="Very High, High"
+            echo "Nenhum artifact analysisPack.zip encontrado. Abortando."
+            exit 1
           fi
+          java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
+            -vid $VID -vkey $VKEY \
+            --file "$ARTIFACT" --issue_details true --fail_on_severity="Very High, High"
 
   sast:
     runs-on: ubuntu-latest
@@ -162,59 +168,36 @@ jobs:
           VKEY: ${{ secrets.APIKEY_VERACODE }}
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          JAR_FILE=$(find . -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
+          # Verifica se existe algum artifact (espera analysisPack.zip) para usar no scan
+          if [ -f "analysisPack.zip" ]; then
+            ARTIFACT="analysisPack.zip"
+          else
+            echo "Nenhum artifact encontrado. Abortando SAST."
+            exit 1
+          fi
 
           if [ "$ENVIRONMENT" == "prod" ]; then
             echo "Executando SAST em ambiente de produção..."
-            if [ -f "$JAR_FILE" ]; then
-              echo "Java build detectado. Usando arquivo: $JAR_FILE"
-              java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                -vid $VID -vkey $VKEY \
-                -action uploadandscan \
-                -appname "${{ inputs.project_veracode }}" \
-                -version "${{ github.run_id }}" \
-                -filepath "$JAR_FILE" \
-                -createprofile true \
-                -deleteincompletescan 2 \
-                -createsandbox false
-            else
-              echo "Nenhum JAR encontrado. Usando analysisPack.zip."
-              java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                -vid $VID -vkey $VKEY \
-                -action uploadandscan \
-                -appname "${{ inputs.project_veracode }}" \
-                -version "${{ github.run_id }}" \
-                -filepath analysisPack.zip \
-                -createprofile true \
-                -deleteincompletescan 2 \
-                -createsandbox false
-            fi
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+              -vid $VID -vkey $VKEY \
+              -action uploadandscan \
+              -appname "${{ inputs.project_veracode }}" \
+              -version "${{ github.run_id }}" \
+              -filepath "$ARTIFACT" \
+              -createprofile true \
+              -deleteincompletescan 2 \
+              -createsandbox false
           else
             echo "Executando SAST em ambiente de sandbox..."
-            if [ -f "$JAR_FILE" ]; then
-              echo "Java build detectado. Usando arquivo: $JAR_FILE"
-              java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                -vid $VID -vkey $VKEY \
-                -action uploadandscan \
-                -appname "${{ inputs.project_veracode }}" \
-                -version "${{ github.run_id }}" \
-                -filepath "$JAR_FILE" \
-                -createprofile true \
-                -deleteincompletescan 2 \
-                -createsandbox true \
-                -sandboxname "$ENVIRONMENT"
-            else
-              echo "Nenhum JAR encontrado. Usando analysisPack.zip."
-              java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-                -vid $VID -vkey $VKEY \
-                -action uploadandscan \
-                -appname "${{ inputs.project_veracode }}" \
-                -version "${{ github.run_id }}" \
-                -filepath analysisPack.zip \
-                -createprofile true \
-                -deleteincompletescan 2 \
-                -createsandbox true \
-                -sandboxname "$ENVIRONMENT"
-            fi
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+              -vid $VID -vkey $VKEY \
+              -action uploadandscan \
+              -appname "${{ inputs.project_veracode }}" \
+              -version "${{ github.run_id }}" \
+              -filepath "$ARTIFACT" \
+              -createprofile true \
+              -deleteincompletescan 2 \
+              -createsandbox true \
+              -sandboxname "$ENVIRONMENT"
           fi
 
