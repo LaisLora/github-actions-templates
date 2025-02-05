@@ -193,7 +193,7 @@ jobs:
       
           if [ "$ENVIRONMENT" == "prod" ]; then
             echo "Executando SAST em ambiente de produção..."
-            java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
               -vid $VID -vkey $VKEY \
               -action uploadandscan \
               -appname "${{ inputs.project_veracode }}" \
@@ -204,7 +204,7 @@ jobs:
               -createsandbox false
           else
             echo "Executando SAST em ambiente de sandbox..."
-            java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
               -vid $VID -vkey $VKEY \
               -action uploadandscan \
               -appname "${{ inputs.project_veracode }}" \
