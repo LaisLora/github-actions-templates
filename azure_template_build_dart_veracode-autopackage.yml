@@ -1,0 +1,95 @@
+trigger:
+- main
+pool:
+  vmImage: ubuntu-latest
+variables:
+  projectBranchName: "$(System.TeamProject).$(Build.SourceBranchName)"
+  flutterTarget: 'apk'
+stages:
+- stage: BuildAndScan
+  displayName: 'Build and Scan Flutter App'
+  jobs:
+  - job: BuildAndPackage
+    displayName: 'Build Flutter App and Package for Veracode'
+    steps:
+    - task: FlutterInstall@0
+      inputs:
+        mode: 'auto'
+        channel: 'stable'
+        version: 'latest'
+      displayName: 'Instalar Flutter'
+    - script: |
+        flutter clean
+        flutter build $(flutterTarget) --debug
+        ls -la build/app/outputs/flutter-apk/
+      displayName: 'Compilar Flutter App'
+    - script: |
+        curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+        ./veracode package --source . --type directory --output $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) --trust
+        # Encontra e descompacta todos os arquivos .zip gerados, colocando todos no mesmo diretório
+        find $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) \( -name "*.apk" -o -name "*.zip" \) | while read filename; do
+          dir=$(dirname "$filename")
+          unzip -o "$filename" -d "$dir"
+        done
+        # Remove os arquivos .zip após a extração
+        rm -rf $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/*.zip
+        # Cria um único arquivo ZIP com todos os artefatos
+        zip analysisPack.zip -r $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)
+        mv analysisPack.zip $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/
+        ls -l $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)
+      env:
+        VERACODE_API_KEY_ID: $(VERACODE_API_ID)
+        VERACODE_API_KEY_SECRET: $(VERACODE_API_KEY)
+        displayName: CLI e package
+    # Publica o pacote de análise como um artefato
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip'
+        ArtifactName: 'analysisPack'
+        publishLocation: 'Container'
+      displayName: 'Publish Analysis Package Artifact'
+  - job: sast
+    displayName: 'Execute SAST'
+    dependsOn: BuildAndPackage
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      # Baixa o artefato do pacote para a análise
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          artifactName: 'analysisPack'
+          targetPath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)'
+      - script: |
+          curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+        displayName: 'Download API Wrappers'
+      - task: Veracode@3
+        inputs:
+          ConnectionDetailsSelection: 'Credentials'
+          apiId: '$(VERACODE_API_ID)'
+          apiKey: '$(VERACODE_API_KEY)'
+          filepath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip'
+          veracodeAppProfile: '$(system.teamProject)'
+          createProfile: true
+          version: '$(build.buildNumber)'
+  - job: pipeline_scan
+    displayName: 'Exe Pipeline Scan'
+    dependsOn: BuildAndPackage
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+      # Baixa o artefato
+      - task: DownloadPipelineArtifact@2
+        inputs:
+          artifactName: 'analysisPack'
+          targetPath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)'
+      # Baixa o Veracode e executa
+      - script: |
+          curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+          unzip pipeline-scan-LATEST.zip -d $(Build.ArtifactStagingDirectory)/scanner
+        displayName: 'Download and Unzip Pipeline Scanner'
+      - script: |
+          java -jar $(Build.ArtifactStagingDirectory)/scanner/pipeline-scan.jar -vid $(VERACODE_API_ID) -vkey $(VERACODE_API_KEY) --file '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip' --issue_details true
+          ls -la $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)
+          chmod 644 $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip
+        continueOnError: true
+        displayName: 'Visualização de vulnerabilidades Pipeline Scan'
