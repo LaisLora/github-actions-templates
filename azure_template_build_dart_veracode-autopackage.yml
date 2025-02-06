@@ -1,10 +1,13 @@
 trigger:
 - main
+
 pool:
   vmImage: ubuntu-latest
+
 variables:
   projectBranchName: "$(System.TeamProject).$(Build.SourceBranchName)"
   flutterTarget: 'apk'
+
 stages:
 - stage: BuildAndScan
   displayName: 'Build and Scan Flutter App'
@@ -18,11 +21,13 @@ stages:
         channel: 'stable'
         version: 'latest'
       displayName: 'Instalar Flutter'
+
     - script: |
         flutter clean
         flutter build $(flutterTarget) --debug
         ls -la build/app/outputs/flutter-apk/
       displayName: 'Compilar Flutter App'
+
     - script: |
         curl -fsS https://tools.veracode.com/veracode-cli/install | sh
         ./veracode package --source . --type directory --output $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) --trust
@@ -48,6 +53,7 @@ stages:
         ArtifactName: 'analysisPack'
         publishLocation: 'Container'
       displayName: 'Publish Analysis Package Artifact'
+
   - job: sast
     displayName: 'Execute SAST'
     dependsOn: BuildAndPackage
@@ -71,6 +77,7 @@ stages:
           veracodeAppProfile: '$(system.teamProject)'
           createProfile: true
           version: '$(build.buildNumber)'
+
   - job: pipeline_scan
     displayName: 'Exe Pipeline Scan'
     dependsOn: BuildAndPackage
