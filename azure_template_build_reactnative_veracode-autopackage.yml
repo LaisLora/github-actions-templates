@@ -1,0 +1,127 @@
+trigger:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  projectBranchName: "$(System.TeamProject).$(Build.SourceBranchName)"
+  VERACODE_WRAPPER_VERSION: '24.7.14.0'
+  VERACODE_SCANNER_URL: 'https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip'
+
+stages:
+  - stage: PackageAndScan
+    displayName: 'Package and Scan React App'
+    jobs:
+      - job: PackageArtifacts
+        displayName: 'Package Artifacts for Veracode'
+        steps:
+          # Configurar Node.js
+          - task: UseNode@1
+            inputs:
+              version: "18.x"
+            displayName: 'Set up Node.js'
+            
+          # Instalar Yarn
+          - script: |
+              echo "Instalando Yarn..."
+              npm install -g yarn
+              yarn --version
+            displayName: 'Install Yarn'
+
+          # Instalar dependências do projeto usando Yarn
+          - script: |
+              echo "Instalando dependências com Yarn..."
+              yarn install --frozen-lockfile
+            displayName: 'Install Project Dependencies'
+
+          # Instalar Veracode CLI e empacotar artefatos
+          - script: |
+              echo "Iniciando instalação do Veracode CLI..."
+              curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+
+              echo "Empacotando artefatos..."
+              ./veracode package --source . --type directory --output $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) --trust
+
+              echo "Criando diretório para extração dos ZIPs..."
+              mkdir -p $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack
+
+              echo "Extraindo todos os arquivos ZIP gerados..."
+              find $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId) -name "*.zip" | while read filename; do
+                unzip -o "$filename" -d $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack
+              done
+
+              echo "Criando um único arquivo ZIP consolidado analysisPack.zip..."
+              zip -r $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack
+
+            displayName: 'Empacotar e Consolidar Artefatos'
+
+          # Publica o pacote de análise como um artefato
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip'
+              ArtifactName: 'analysisPack'
+              publishLocation: 'Container'
+            displayName: 'Publish Analysis Package Artifact'
+
+  - stage: SecurityAnalysis
+    displayName: 'Security Analysis Stage'
+    dependsOn: PackageAndScan
+    jobs:
+      - job: sast
+        displayName: 'Execute SAST Analysis'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          # Baixa o artefato para análise
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              artifactName: 'analysisPack'
+              targetPath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)'
+            displayName: 'Download Analysis Package'
+
+          # Baixa e configura Veracode API Wrappers
+          - script: |
+              echo "Baixando Veracode API Wrappers versão $(VERACODE_WRAPPER_VERSION)..."
+              curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/$(VERACODE_WRAPPER_VERSION)/vosp-api-wrappers-java-$(VERACODE_WRAPPER_VERSION).jar
+            displayName: 'Download API Wrappers'
+
+          - task: Veracode@3
+            inputs:
+              ConnectionDetailsSelection: 'Credentials'
+              apiId: '$(VERACODE_API_ID)'
+              apiKey: '$(VERACODE_API_KEY)'
+              filepath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip'
+              veracodeAppProfile: '$(system.teamProject)'
+              createProfile: true
+              version: '$(build.buildNumber)'
+            displayName: 'Run Veracode SAST Scan'
+
+      - job: pipeline_scan
+        displayName: 'Execute Pipeline Scan'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          # Baixa o artefato para análise
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              artifactName: 'analysisPack'
+              targetPath: '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)'
+            displayName: 'Download Analysis Package'
+
+          # Baixa e extrai o scanner
+          - script: |
+              echo "Baixando Veracode Pipeline Scanner..."
+              curl -O -L $(VERACODE_SCANNER_URL)
+              unzip pipeline-scan-LATEST.zip -d $(Build.ArtifactStagingDirectory)/scanner
+              chmod +x $(Build.ArtifactStagingDirectory)/scanner/pipeline-scan.jar
+            displayName: 'Download and Unzip Pipeline Scanner'
+
+          # Executa a análise do pipeline
+          - script: |
+              echo "Executando Veracode Pipeline Scan no arquivo: $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip"
+              chmod 644 $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip
+              java -jar $(Build.ArtifactStagingDirectory)/scanner/pipeline-scan.jar -vid $(VERACODE_API_ID) -vkey $(VERACODE_API_KEY) --file '$(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)/analysisPack.zip' --issue_details true
+              ls -la $(Build.ArtifactStagingDirectory)/artifacts/$(Build.BuildId)
+            continueOnError: true
+            displayName: 'Run Veracode Pipeline Scan'
