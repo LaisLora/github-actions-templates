@@ -25,9 +25,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Código
+      - name: Checkout do Código
         uses: actions/checkout@v4
 
+      # Detecta se é um projeto Maven
       - name: Detectar Projeto Java-Maven
         id: check_maven
         run: |
@@ -37,34 +38,91 @@ jobs:
             echo "java_maven=false" >> $GITHUB_ENV
           fi
 
+      # Detecta se é um projeto Gradle (build.gradle ou build.gradle.kts)
+      - name: Detectar Projeto Java-Gradle
+        id: check_gradle
+        run: |
+          if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "java_gradle=true" >> $GITHUB_ENV
+          else
+            echo "java_gradle=false" >> $GITHUB_ENV
+          fi
+
+      # Extrai a versão do Java do pom.xml (para Maven)
       - name: Detectar versão do Java no pom.xml
         if: env.java_maven == 'true'
-        id: detect_java
+        id: detect_java_maven
         run: |
-          # Tenta extrair o valor de <maven.compiler.source> do pom.xml
+          # Tenta extrair o valor da tag <maven.compiler.source>; caso não encontre, usa "11"
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
           echo "Versão do Java detectada: $JAVA_VERSION"
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
+          echo "java_version_maven=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
+      # Extrai a versão do Java do build.gradle (ou build.gradle.kts) – tenta ler a propriedade sourceCompatibility
+      - name: Detectar versão do Java no Gradle
+        if: env.java_gradle == 'true'
+        id: detect_java_gradle
+        run: |
+          if [ -f "build.gradle" ]; then
+            JAVA_VERSION=$(grep -oP "sourceCompatibility\s*=?\s*['\"]?\K[0-9.]+" build.gradle || echo "11")
+          elif [ -f "build.gradle.kts" ]; then
+            JAVA_VERSION=$(grep -oP "sourceCompatibility\s*=?\s*['\"]?\K[0-9.]+" build.gradle.kts || echo "11")
+          else
+            JAVA_VERSION="11"
+          fi
+          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "java_version_gradle=$JAVA_VERSION" >> $GITHUB_OUTPUT
+
+      # Configura o JDK e o cache para Maven
       - name: Configurar JDK e Maven
         if: env.java_maven == 'true'
         uses: actions/setup-java@v3
         with:
-          java-version: ${{ steps.detect_java.outputs.java_version }}
+          java-version: ${{ steps.detect_java_maven.outputs.java_version_maven }}
           distribution: 'temurin'
           cache: maven
 
+      # Configura o JDK e o cache para Gradle
+      - name: Configurar JDK e Gradle
+        if: env.java_gradle == 'true'
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ steps.detect_java_gradle.outputs.java_version_gradle }}
+          distribution: 'temurin'
+          cache: gradle
+
+      # Compila o projeto Maven
       - name: Compilar Projeto Maven
         if: env.java_maven == 'true'
         run: mvn clean package
 
+      # Compila o projeto Gradle
+      - name: Compilar Projeto Gradle
+        if: env.java_gradle == 'true'
+        run: |
+          # Garante que o wrapper tenha permissão de execução
+          chmod +x gradlew
+          ./gradlew clean build
+
+      # Exemplo de etapa para preparar os artefatos para o Veracode (ajuste conforme sua necessidade)
       - name: Instalar CLI do Veracode e Autopack-Veracode
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-      
-          # Procura por arquivos WAR, JAR ou ZIP na pasta target
-          WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
-          JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+          
+          # Define o diretório de saída de acordo com a ferramenta de build utilizada
+          if [ "${{ env.java_maven }}" = "true" ]; then
+            OUTPUT_DIR="target"
+          elif [ "${{ env.java_gradle }}" = "true" ]; then
+            OUTPUT_DIR="build/libs"
+          else
+            OUTPUT_DIR="."
+          fi
+          
+          # Procura arquivos WAR, JAR ou ZIP no diretório de saída
+          WAR_FILE=$(find $OUTPUT_DIR -maxdepth 1 -name "*.war" | head -n 1)
+          JAR_FILE=$(find $OUTPUT_DIR -maxdepth 1 -name "*.jar" | head -n 1)
+          
+          echo "Arquivos encontrados: WAR: $WAR_FILE, JAR: $JAR_FILE"
       
           if [ -f "$WAR_FILE" ]; then
             echo "WAR encontrado: $WAR_FILE"
