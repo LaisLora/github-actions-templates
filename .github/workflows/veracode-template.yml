@@ -28,7 +28,7 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
-      # Define o tipo de projeto com base nos arquivos encontrados.
+      # Define o tipo de projeto: Maven se existir pom.xml; Gradle se existir build.gradle(.kts)
       - name: Definir Tipo de Projeto
         id: set_type
         run: |
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-      # Para projetos Maven: extrai a versão do Java do pom.xml.
+      # Para projetos Maven: extrai a versão do Java do pom.xml (usa "11" se não encontrado)
       - name: Detectar Versão do Java no pom.xml
         if: steps.set_type.outputs.project_type == 'maven'
         id: detect_maven
@@ -52,8 +52,8 @@ jobs:
 
       # Para projetos Gradle: tenta extrair a versão do Java de duas fontes:
       # 1. Pela seção compileOptions (ex.: sourceCompatibility = JavaVersion.VERSION_1_8)
-      # 2. Se não encontrar, busca no bloco defaultConfig pela propriedade (ex.: minSdk = "21")
-      # Se ainda não identificar, define o fallback multi (matrix com JDKs 7, 17 e 21).
+      # 2. Se não encontrar, busca no bloco defaultConfig pela propriedade minSdk (ex.: minSdk = "21")
+      # Se ainda não identificar, define o fallback como "multi" (matrix com [7,17,21])
       - name: Detectar Versão do Java no Gradle
         if: steps.set_type.outputs.project_type == 'gradle'
         id: detect_gradle
@@ -73,9 +73,8 @@ jobs:
           RAW=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" "$FILE" | head -n1)
           if [ -z "$RAW" ]; then
             echo "Não encontrou versão em compileOptions."
-            # Tenta extrair no bloco defaultConfig pela propriedade minSdk.
-            # Utilizamos uma expressão regular com aspas simples e escape para inserir uma aspa dupla.
-            RAW=$(grep -oP '(?<=minSdk\s*=\s*["'"'"'])[0-9]+(?=["'"'"'])' "$FILE" | head -n1)
+            # Tenta extrair no bloco defaultConfig pela propriedade minSdk
+            RAW=$(grep -oP "(?<=minSdk\s*=\s*[\"'])[0-9]+(?=[\"'])" "$FILE" | head -n1)
             if [ -n "$RAW" ]; then
               echo "Encontrou minSdk no defaultConfig: $RAW"
             fi
@@ -156,7 +155,7 @@ jobs:
         run: echo "Fallback mode ativo: JDK ${{ matrix.jdk }} instalado; build não executado."
 
   autopack:
-    needs: [build-maven, build-gradle]
+    needs: detect
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do Código
