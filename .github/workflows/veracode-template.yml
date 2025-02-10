@@ -50,19 +50,31 @@ jobs:
           echo "Versão do Java detectada: $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Para Gradle: extrai a versão do Java do gradle.properties, se definido, ou usa 11
+      # Para Gradle: tenta extrair a versão do Java de gradle.properties ou do build.gradle (defaultConfig)
       - name: Detectar Versão do Java (Gradle)
         if: env.build_tool == 'gradle'
         id: detect_java_gradle
         run: |
+          # Tenta extrair de gradle.properties
           if [ -f "gradle.properties" ]; then
-            JAVA_VERSION=$(grep -oPm1 "(?<=^javaVersion=)[^[:space:]]+" gradle.properties || echo "11")
-            echo "Versão do Java detectada: $JAVA_VERSION"
-            echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "gradle.properties não encontrado. Usando valor padrão 11."
-            echo "java_version=11" >> $GITHUB_OUTPUT
+            JAVA_VERSION=$(grep -oPm1 "(?<=^javaVersion=)[^[:space:]]+" gradle.properties || echo "")
           fi
+          # Se não encontrou na gradle.properties, tenta identificar se existe o bloco defaultConfig no build.gradle
+          if [ -z "$JAVA_VERSION" ]; then
+            if grep -q "defaultConfig" build.gradle; then
+              echo "defaultConfig encontrada no build.gradle. Usando javaVersion=11 como padrão."
+              JAVA_VERSION=11
+            fi
+          fi
+          # Se ainda não encontrou, instala as versões fallback e define como padrão a 11
+          if [ -z "$JAVA_VERSION" ]; then
+            echo "Nenhuma versão de Java detectada. Instalando versões fallback: 7, 11, 17 e 21."
+            sudo apt-get update
+            sudo apt-get install -y openjdk-7-jdk openjdk-11-jdk openjdk-17-jdk openjdk-21-jdk
+            JAVA_VERSION=11
+          fi
+          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
       # Configurar JDK e cache para Maven
       - name: Configurar JDK e Maven
@@ -99,7 +111,7 @@ jobs:
             gradle clean build
           fi
 
-      # Instala CLI do Veracode e empacota os artefatos para análise
+      # Instalar CLI do Veracode e empacotar artefatos para análise
       - name: Instalar CLI do Veracode e Autopack-Veracode
         run: |
           ARTIFACT_DIR="${{ github.workspace }}/artifacts/${{ inputs.build-id }}"
@@ -147,7 +159,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Executar Veracode SCA
         continue-on-error: true
         env:
@@ -163,20 +174,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: analysisPack
-
       - name: Baixar Veracode Pipeline Scanner
         run: curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
-
       - name: Extrair Veracode Pipeline Scanner
         run: unzip pipeline-scan-LATEST.zip -d ${{ github.workspace }}/scanner
-
       - name: Executar Veracode Pipeline Scan
         id: pipeline_scan
         env:
           VID: ${{ secrets.APIID_VERACODE }}
           VKEY: ${{ secrets.APIKEY_VERACODE }}
         run: |
-          # Procura pelo arquivo WAR ou JAR (excluindo pipeline-scan.jar)
           WAR_FILE=$(find . -name "*.war" | head -n 1)
           JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
           
@@ -205,11 +212,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: analysisPack
-
       - name: Baixar Veracode SAST Wrapper
-        run: |
-          curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
-
+        run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
       - name: Executar Veracode SAST
         env:
           VID: ${{ secrets.APIID_VERACODE }}
