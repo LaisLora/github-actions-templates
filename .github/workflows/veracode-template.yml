@@ -17,7 +17,7 @@ on:
         type: string
 
 jobs:
-  detect:
+  autopack:
     runs-on: ubuntu-latest
     outputs:
       project_type: ${{ steps.set_type.outputs.project_type }}
@@ -114,7 +114,7 @@ jobs:
           echo "::set-output name=gradle_matrix::$MATRIX"
 
   build-maven:
-    needs: detect
+    needs: autopack
     if: needs.detect.outputs.project_type == 'maven'
     runs-on: ubuntu-latest
     steps:
@@ -132,7 +132,7 @@ jobs:
         run: mvn clean package
 
   build-gradle:
-    needs: detect
+    needs: autopack
     if: needs.detect.outputs.project_type == 'gradle'
     runs-on: ubuntu-latest
     strategy:
