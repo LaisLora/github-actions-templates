@@ -28,7 +28,7 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
-      # Define o tipo de projeto: Maven se existir pom.xml; Gradle se existir build.gradle(.kts)
+      # Define o tipo de projeto com base nos arquivos encontrados.
       - name: Definir Tipo de Projeto
         id: set_type
         run: |
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-      # Se for Maven, extrai a versão do Java do pom.xml
+      # Se for Maven, extrai a versão do Java do pom.xml.
       - name: Detectar Versão do Java no pom.xml
         if: steps.set_type.outputs.project_type == 'maven'
         id: detect_maven
@@ -50,10 +50,10 @@ jobs:
           echo "Maven Java Version: $JAVA_VERSION"
           echo "::set-output name=maven_java::$JAVA_VERSION"
 
-      # Se for Gradle, tenta extrair a versão do Java em duas fontes:
+      # Se for Gradle, tenta extrair a versão do Java de duas fontes:
       # 1. Pela seção compileOptions (ex.: sourceCompatibility = JavaVersion.VERSION_1_8)
-      # 2. Se não encontrar, busca no bloco defaultConfig por uma propriedade (ex.: minSdk = "21")
-      # Se ainda não identificar, define o modo de fallback "multi"
+      # 2. Se não encontrar, busca no bloco defaultConfig pela propriedade (ex.: minSdk = "21")
+      # Se ainda não identificar, define o fallback multi (matrix com JDKs 7, 17 e 21).
       - name: Detectar Versão do Java no Gradle
         if: steps.set_type.outputs.project_type == 'gradle'
         id: detect_gradle
@@ -86,6 +86,7 @@ jobs:
             echo "Nenhuma versão do Java encontrada; utilizando fallback multi."
             DETECTED="multi"
           else
+            # Se RAW estiver no padrão "JavaVersion.VERSION_xx", extrai o número.
             if [[ "$RAW" == JavaVersion.VERSION_* ]]; then
               MAJOR=$(echo "$RAW" | sed -E 's/.*VERSION_([0-9]+)[_.]?.*/\1/')
               MINOR=$(echo "$RAW" | sed -E 's/.*VERSION_[0-9]+[_.]?([0-9]*)/\1/')
@@ -117,14 +118,12 @@ jobs:
     steps:
       - name: Checkout do Código
         uses: actions/checkout@v4
-
       - name: Configurar JDK para Maven
         uses: actions/setup-java@v3
         with:
           java-version: ${{ needs.detect.outputs.maven_java }}
           distribution: temurin
           cache: maven
-
       - name: Build Maven
         run: mvn clean package
 
@@ -138,34 +137,29 @@ jobs:
     steps:
       - name: Checkout do Código
         uses: actions/checkout@v4
-
       - name: Configurar JDK ${{ matrix.jdk }}
         uses: actions/setup-java@v3
         with:
           java-version: ${{ matrix.jdk }}
           distribution: temurin
           cache: gradle
-
-      # Se o modo de detecção for "single" (ou seja, a versão foi identificada), executa o build.
+      # Se a detecção foi "single", executa o build.
       - name: Build Gradle
         if: ${{ needs.detect.outputs.detected_mode == 'single' }}
         run: |
           chmod +x gradlew
           ./gradlew clean build
-
-      # Se estiver em fallback ("multi"), apenas instala os JDKs, sem executar o build.
+      # Se estiver em fallback ("multi"), apenas instala os JDKs sem executar o build.
       - name: Instalar JDK (Fallback Mode - Não executa build)
         if: ${{ needs.detect.outputs.detected_mode == 'multi' }}
         run: echo "Fallback mode ativo: JDK ${{ matrix.jdk }} instalado; build não executado."
 
-  # Exemplo de job para preparar artefatos e executar outros scans (SCA, SAST, etc.)
   autopack:
     needs: [build-maven, build-gradle]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do Código
         uses: actions/checkout@v4
-
       - name: Preparar Artefatos para Veracode
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
@@ -193,7 +187,6 @@ jobs:
             zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
             mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
           fi
-
       - name: Publicar Artefato para Análise
         uses: actions/upload-artifact@v4
         with:
@@ -204,8 +197,6 @@ jobs:
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
           retention-days: 1
 
-  # Outros jobs (SCA, pipeline_scan, SAST) podem ser adicionados conforme necessário.
- # Outras etapas de SCA, Pipeline Scan e SAST podem ser adicionadas conforme necessário.
   sca:
     runs-on: ubuntu-latest
     steps:
@@ -307,3 +298,6 @@ jobs:
               -createprofile true \
               -deleteincompletescan 2 \
               -createsandbox true \
+              -sandboxname "$ENVIRONMENT"
+          fi
+
