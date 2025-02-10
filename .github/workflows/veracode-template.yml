@@ -28,7 +28,7 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
-      # Detecta se é um projeto Maven
+      # Detecta se é um projeto Maven (presença do pom.xml)
       - name: Detectar Projeto Java-Maven
         id: check_maven
         run: |
@@ -38,7 +38,7 @@ jobs:
             echo "java_maven=false" >> $GITHUB_ENV
           fi
 
-      # Detecta se é um projeto Gradle (build.gradle ou build.gradle.kts)
+      # Detecta se é um projeto Gradle (presença do build.gradle ou build.gradle.kts)
       - name: Detectar Projeto Java-Gradle
         id: check_gradle
         run: |
@@ -48,17 +48,17 @@ jobs:
             echo "java_gradle=false" >> $GITHUB_ENV
           fi
 
-      # Extrai a versão do Java do pom.xml (para Maven)
+      # Para projetos Maven: extrai a versão do Java do pom.xml
       - name: Detectar versão do Java no pom.xml
         if: env.java_maven == 'true'
         id: detect_java_maven
         run: |
-          # Tenta extrair o valor da tag <maven.compiler.source>; caso não encontre, usa "11"
+          # Tenta extrair o valor da tag <maven.compiler.source>; se não encontrar, usa "11"
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "Versão do Java detectada (Maven): $JAVA_VERSION"
           echo "java_version_maven=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Extrai a versão do Java do build.gradle (ou build.gradle.kts) – tenta ler a propriedade sourceCompatibility
+      # Para projetos Gradle: extrai a versão do Java do build.gradle ou build.gradle.kts
       - name: Detectar versão do Java no Gradle
         if: env.java_gradle == 'true'
         id: detect_java_gradle
@@ -70,39 +70,50 @@ jobs:
           else
             JAVA_VERSION="11"
           fi
-          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "Versão do Java detectada (Gradle): $JAVA_VERSION"
           echo "java_version_gradle=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Configura o JDK e o cache para Maven
-      - name: Configurar JDK e Maven
+      # Configura o JDK para projeto Maven e instala as dependências
+      - name: Configurar JDK para Maven e instalar dependências
         if: env.java_maven == 'true'
         uses: actions/setup-java@v3
         with:
           java-version: ${{ steps.detect_java_maven.outputs.java_version_maven }}
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
-      # Configura o JDK e o cache para Gradle
-      - name: Configurar JDK e Gradle
+      - name: Instalar dependências Maven
+        if: env.java_maven == 'true'
+        run: mvn dependency:resolve
+
+      # Configura o JDK para projeto Gradle e instala as dependências
+      - name: Configurar JDK para Gradle e instalar dependências
         if: env.java_gradle == 'true'
         uses: actions/setup-java@v3
         with:
           java-version: ${{ steps.detect_java_gradle.outputs.java_version_gradle }}
-          distribution: 'temurin'
+          distribution: temurin
           cache: gradle
 
-      # Compila o projeto Maven
+      - name: Instalar dependências Gradle
+        if: env.java_gradle == 'true'
+        run: |
+          # Garante permissão para o wrapper e baixa as dependências
+          chmod +x gradlew
+          ./gradlew --no-daemon dependencies
+
+      # Build do projeto Maven
       - name: Compilar Projeto Maven
         if: env.java_maven == 'true'
         run: mvn clean package
 
-      # Compila o projeto Gradle
+      # Build do projeto Gradle
       - name: Compilar Projeto Gradle
         if: env.java_gradle == 'true'
         run: |
-          # Garante que o wrapper tenha permissão de execução
           chmod +x gradlew
           ./gradlew clean build
+
 
       # Exemplo de etapa para preparar os artefatos para o Veracode (ajuste conforme sua necessidade)
       - name: Instalar CLI do Veracode e Autopack-Veracode
