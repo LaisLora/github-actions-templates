@@ -28,7 +28,7 @@ jobs:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Detecta a ferramenta de build: Maven ou Gradle
+      # Detecta a ferramenta de build: Maven ou Gradle (incluindo build.gradlew.kst)
       - name: Detectar Ferramenta de Build
         id: detect_build
         run: |
@@ -37,7 +37,7 @@ jobs:
           elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
             echo "build_tool=gradle" >> $GITHUB_ENV
           else
-            echo "Nenhum arquivo de build encontrado (pom.xml ou build.gradle). Abortando."
+            echo "Nenhum arquivo de build encontrado (pom.xml ou build.gradle*). Abortando."
             exit 1
           fi
 
@@ -55,22 +55,22 @@ jobs:
         if: env.build_tool == 'gradle'
         id: detect_java_gradle
         run: |
-          # Tenta extrair de gradle.properties
+          # Tenta extrair a versão definida em gradle.properties
           if [ -f "gradle.properties" ]; then
             JAVA_VERSION=$(grep -oPm1 "(?<=^javaVersion=)[^[:space:]]+" gradle.properties || echo "")
           fi
-          # Se não encontrou na gradle.properties, tenta identificar se existe o bloco defaultConfig no build.gradle
+          # Se não encontrou, tenta detectar se há o bloco defaultConfig no build.gradle e assume 11
           if [ -z "$JAVA_VERSION" ]; then
             if grep -q "defaultConfig" build.gradle; then
               echo "defaultConfig encontrada no build.gradle. Usando javaVersion=11 como padrão."
               JAVA_VERSION=11
             fi
           fi
-          # Se ainda não encontrou, instala as versões fallback e define como padrão a 11
+          # Se ainda não encontrou, instala os JDKs disponíveis e define 11 como padrão
           if [ -z "$JAVA_VERSION" ]; then
-            echo "Nenhuma versão de Java detectada. Instalando versões fallback: 7, 11, 17 e 21."
+            echo "Nenhuma versão de Java detectada. Instalando versões fallback: openjdk-11, openjdk-17 e openjdk-21."
             sudo apt-get update
-            sudo apt-get install -y openjdk-7-jdk openjdk-11-jdk openjdk-17-jdk openjdk-21-jdk
+            sudo apt-get install -y openjdk-11-jdk openjdk-17-jdk openjdk-21-jdk
             JAVA_VERSION=11
           fi
           echo "Versão do Java detectada: $JAVA_VERSION"
@@ -159,6 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Executar Veracode SCA
         continue-on-error: true
         env:
@@ -174,10 +175,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: analysisPack
+
       - name: Baixar Veracode Pipeline Scanner
         run: curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+
       - name: Extrair Veracode Pipeline Scanner
         run: unzip pipeline-scan-LATEST.zip -d ${{ github.workspace }}/scanner
+
       - name: Executar Veracode Pipeline Scan
         id: pipeline_scan
         env:
@@ -212,8 +216,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: analysisPack
+
       - name: Baixar Veracode SAST Wrapper
         run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
       - name: Executar Veracode SAST
         env:
           VID: ${{ secrets.APIID_VERACODE }}
