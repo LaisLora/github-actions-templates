@@ -17,13 +17,13 @@ on:
         type: string
 
 jobs:
-  # Job de detecção do tipo de projeto e da versão do Java
   detect:
     runs-on: ubuntu-latest
     outputs:
       project_type: ${{ steps.set_type.outputs.project_type }}
       gradle_matrix: ${{ steps.detect_gradle.outputs.gradle_matrix }}
       maven_java: ${{ steps.detect_maven.outputs.maven_java }}
+      detected_mode: ${{ steps.detect_gradle.outputs.detected_mode }}
     steps:
       - name: Checkout do Código
         uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-      # Se for Maven, extrai a versão do Java do pom.xml pela tag <maven.compiler.source>
+      # Se for Maven, extrai a versão do Java do pom.xml
       - name: Detectar Versão do Java no pom.xml
         if: steps.set_type.outputs.project_type == 'maven'
         id: detect_maven
@@ -50,10 +50,10 @@ jobs:
           echo "Maven Java Version: $JAVA_VERSION"
           echo "::set-output name=maven_java::$JAVA_VERSION"
 
-      # Se for Gradle, tenta extrair a versão do Java de duas fontes:
-      # 1. Pela seção compileOptions (sourceCompatibility = JavaVersion.VERSION_xx)
-      # 2. Se não encontrar, busca no bloco defaultConfig por uma propriedade (por exemplo, minSdk = "21")
-      # Se ainda não identificar, utiliza fallback multi com os SDKs 7, 17 e 21.
+      # Se for Gradle, tenta extrair a versão do Java em duas fontes:
+      # 1. Pela seção compileOptions (ex.: sourceCompatibility = JavaVersion.VERSION_1_8)
+      # 2. Se não encontrar, busca no bloco defaultConfig por uma propriedade (ex.: minSdk = "21")
+      # Se ainda não identificar, define o modo de fallback "multi"
       - name: Detectar Versão do Java no Gradle
         if: steps.set_type.outputs.project_type == 'gradle'
         id: detect_gradle
@@ -67,15 +67,14 @@ jobs:
             echo "Arquivo de build Gradle não encontrado."
             exit 1
           fi
-
           echo "Usando arquivo: $FILE"
 
-          # Tenta extrair pela seção compileOptions (exemplo: sourceCompatibility = JavaVersion.VERSION_1_8)
+          # Tenta extrair pela seção compileOptions
           RAW=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" "$FILE" | head -n1)
           if [ -z "$RAW" ]; then
             echo "Não encontrou versão em compileOptions."
-            # Tenta extrair no bloco defaultConfig por uma propriedade, por exemplo: minSdk = "21"
-            RAW=$(sed -n '/defaultConfig {/,/}/{s/.*minSdk\s*=\s*["'"'"']\K[0-9]+(?=["'"'"']).*/p' "$FILE" | head -n1)
+            # Tenta extrair no bloco defaultConfig pela propriedade minSdk
+            RAW=$(grep -oP "(?<=minSdk\s*=\s*['\"])[0-9]+(?=['\"])" "$FILE" | head -n1)
             if [ -n "$RAW" ]; then
               echo "Encontrou minSdk no defaultConfig: $RAW"
             fi
@@ -87,7 +86,6 @@ jobs:
             echo "Nenhuma versão do Java encontrada; utilizando fallback multi."
             DETECTED="multi"
           else
-            # Se RAW estiver no padrão "JavaVersion.VERSION_xx", extrai o número.
             if [[ "$RAW" == JavaVersion.VERSION_* ]]; then
               MAJOR=$(echo "$RAW" | sed -E 's/.*VERSION_([0-9]+)[_.]?.*/\1/')
               MINOR=$(echo "$RAW" | sed -E 's/.*VERSION_[0-9]+[_.]?([0-9]*)/\1/')
@@ -97,24 +95,21 @@ jobs:
                 DETECTED="$MAJOR"
               fi
             else
-              # Se RAW já for apenas um número (extraído do minSdk), use-o.
               DETECTED="$RAW"
             fi
           fi
 
           echo "Versão detectada: $DETECTED"
-
-          # Se não foi encontrada uma versão válida, define fallback multi.
           if [ "$DETECTED" = "multi" ]; then
             MATRIX='[7,17,21]'
+            echo "::set-output name=detected_mode::multi"
           else
             MATRIX="[\"$DETECTED\"]"
+            echo "::set-output name=detected_mode::single"
           fi
-
           echo "Matrix para JDK: $MATRIX"
           echo "::set-output name=gradle_matrix::$MATRIX"
 
-  # Job de build para Maven
   build-maven:
     needs: detect
     if: needs.detect.outputs.project_type == 'maven'
@@ -133,7 +128,6 @@ jobs:
       - name: Build Maven
         run: mvn clean package
 
-  # Job de build para Gradle – se for detectado como Gradle, usa matrix para rodar com o(s) JDK(s) definido(s)
   build-gradle:
     needs: detect
     if: needs.detect.outputs.project_type == 'gradle'
@@ -152,12 +146,19 @@ jobs:
           distribution: temurin
           cache: gradle
 
+      # Se o modo de detecção for "single" (ou seja, a versão foi identificada), executa o build.
       - name: Build Gradle
+        if: ${{ needs.detect.outputs.detected_mode == 'single' }}
         run: |
           chmod +x gradlew
           ./gradlew clean build
 
-  # (Opcional) Etapas adicionais para integração com Veracode, SCA, SAST, etc.
+      # Se estiver em fallback ("multi"), apenas instala os JDKs, sem executar o build.
+      - name: Instalar JDK (Fallback Mode - Não executa build)
+        if: ${{ needs.detect.outputs.detected_mode == 'multi' }}
+        run: echo "Fallback mode ativo: JDK ${{ matrix.jdk }} instalado; build não executado."
+
+  # Exemplo de job para preparar artefatos e executar outros scans (SCA, SAST, etc.)
   autopack:
     needs: [build-maven, build-gradle]
     runs-on: ubuntu-latest
@@ -168,7 +169,7 @@ jobs:
       - name: Preparar Artefatos para Veracode
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-          if [ -f "target" ]; then
+          if [ -d "target" ]; then
             OUTPUT_DIR="target"
           elif [ -d "build/libs" ]; then
             OUTPUT_DIR="build/libs"
@@ -203,7 +204,8 @@ jobs:
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
           retention-days: 1
 
-  # Outras etapas de SCA, Pipeline Scan e SAST podem ser adicionadas conforme necessário.
+  # Outros jobs (SCA, pipeline_scan, SAST) podem ser adicionados conforme necessário.
+ # Outras etapas de SCA, Pipeline Scan e SAST podem ser adicionadas conforme necessário.
   sca:
     runs-on: ubuntu-latest
     steps:
@@ -305,5 +307,3 @@ jobs:
               -createprofile true \
               -deleteincompletescan 2 \
               -createsandbox true \
-              -sandboxname "$ENVIRONMENT"
-          fi
