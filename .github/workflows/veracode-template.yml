@@ -28,7 +28,7 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
-      # Detecta se é um projeto Maven (presença do pom.xml)
+      # Detecta se é um projeto Maven (pom.xml)
       - name: Detectar Projeto Java-Maven
         id: check_maven
         run: |
@@ -38,7 +38,7 @@ jobs:
             echo "java_maven=false" >> $GITHUB_ENV
           fi
 
-      # Detecta se é um projeto Gradle (presença do build.gradle ou build.gradle.kts)
+      # Detecta se é um projeto Gradle (build.gradle ou build.gradle.kts)
       - name: Detectar Projeto Java-Gradle
         id: check_gradle
         run: |
@@ -48,32 +48,44 @@ jobs:
             echo "java_gradle=false" >> $GITHUB_ENV
           fi
 
-      # Para projetos Maven: extrai a versão do Java do pom.xml
+      # Para Maven: extrai a versão do Java do pom.xml
       - name: Detectar versão do Java no pom.xml
         if: env.java_maven == 'true'
         id: detect_java_maven
         run: |
-          # Tenta extrair o valor da tag <maven.compiler.source>; se não encontrar, usa "11"
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
           echo "Versão do Java detectada (Maven): $JAVA_VERSION"
           echo "java_version_maven=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Para projetos Gradle: extrai a versão do Java do build.gradle ou build.gradle.kts
+      # Para Gradle: extrai a versão do Java do build.gradle ou build.gradle.kts
       - name: Detectar versão do Java no Gradle
         if: env.java_gradle == 'true'
         id: detect_java_gradle
         run: |
           if [ -f "build.gradle" ]; then
-            JAVA_VERSION=$(grep -oP "sourceCompatibility\s*=?\s*['\"]?\K[0-9.]+" build.gradle || echo "11")
+            RAW_VERSION=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" build.gradle | head -n1)
           elif [ -f "build.gradle.kts" ]; then
-            JAVA_VERSION=$(grep -oP "sourceCompatibility\s*=?\s*['\"]?\K[0-9.]+" build.gradle.kts || echo "11")
+            RAW_VERSION=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" build.gradle.kts | head -n1)
+          else
+            RAW_VERSION=""
+          fi
+
+          if [ -n "$RAW_VERSION" ]; then
+            MAJOR=$(echo "$RAW_VERSION" | sed -E 's/.*VERSION_([0-9]+)[_.]?.*/\1/')
+            MINOR=$(echo "$RAW_VERSION" | sed -E 's/.*VERSION_[0-9]+[_.]?([0-9]*)/\1/')
+            if [ "$MAJOR" = "1" ] && [ -n "$MINOR" ]; then
+              JAVA_VERSION="$MINOR"
+            else
+              JAVA_VERSION="$MAJOR"
+            fi
           else
             JAVA_VERSION="11"
           fi
+
           echo "Versão do Java detectada (Gradle): $JAVA_VERSION"
           echo "java_version_gradle=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Configura o JDK para projeto Maven e instala as dependências
+      # Configura o JDK para Maven (usando a versão detectada) e instala dependências
       - name: Configurar JDK para Maven e instalar dependências
         if: env.java_maven == 'true'
         uses: actions/setup-java@v3
@@ -86,7 +98,7 @@ jobs:
         if: env.java_maven == 'true'
         run: mvn dependency:resolve
 
-      # Configura o JDK para projeto Gradle e instala as dependências
+      # Configura o JDK para Gradle (usando a versão detectada) e instala dependências
       - name: Configurar JDK para Gradle e instalar dependências
         if: env.java_gradle == 'true'
         uses: actions/setup-java@v3
@@ -98,7 +110,6 @@ jobs:
       - name: Instalar dependências Gradle
         if: env.java_gradle == 'true'
         run: |
-          # Garante permissão para o wrapper e baixa as dependências
           chmod +x gradlew
           ./gradlew --no-daemon dependencies
 
