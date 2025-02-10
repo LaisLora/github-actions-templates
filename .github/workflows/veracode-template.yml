@@ -16,177 +16,123 @@ on:
         required: true
         type: string
 
+env:
+  project: ${{ inputs.project_veracode }}
+  environment: ${{ inputs.environment }}
+
 jobs:
-  detect:
+  autopack:
     runs-on: ubuntu-latest
-    outputs:
-      project_type: ${{ steps.set_type.outputs.project_type }}
-      gradle_matrix: ${{ steps.detect_gradle.outputs.gradle_matrix }}
-      maven_java: ${{ steps.detect_maven.outputs.maven_java }}
-      detected_mode: ${{ steps.detect_gradle.outputs.detected_mode }}
+
     steps:
-      - name: Checkout do Código
+      - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Define o tipo de projeto: Maven se existir pom.xml; Gradle se existir build.gradle(.kts)
-      - name: Definir Tipo de Projeto
-        id: set_type
+      # Detecta a ferramenta de build: Maven ou Gradle
+      - name: Detectar Ferramenta de Build
+        id: detect_build
         run: |
           if [ -f "pom.xml" ]; then
-            echo "::set-output name=project_type::maven"
+            echo "build_tool=maven" >> $GITHUB_ENV
           elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-            echo "::set-output name=project_type::gradle"
+            echo "build_tool=gradle" >> $GITHUB_ENV
           else
-            echo "Nenhum arquivo de projeto conhecido encontrado."
+            echo "Nenhum arquivo de build encontrado (pom.xml ou build.gradle). Abortando."
             exit 1
           fi
 
-      # Para projetos Maven: extrai a versão do Java do pom.xml (usa "11" se não encontrado)
-      - name: Detectar Versão do Java no pom.xml
-        if: steps.set_type.outputs.project_type == 'maven'
-        id: detect_maven
+      # Para Maven: extrai a versão do Java do pom.xml
+      - name: Detectar Versão do Java (Maven)
+        if: env.build_tool == 'maven'
+        id: detect_java_maven
         run: |
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          echo "Maven Java Version: $JAVA_VERSION"
-          echo "::set-output name=maven_java::$JAVA_VERSION"
+          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Para projetos Gradle: tenta extrair a versão do Java de duas fontes:
-      # 1. Pela seção compileOptions (ex.: sourceCompatibility = JavaVersion.VERSION_1_8)
-      # 2. Se não encontrar, busca no bloco defaultConfig pela propriedade minSdk (ex.: minSdk = "21")
-      # Se ainda não identificar, define o fallback como "multi" (matrix com [7,17,21])
-      - name: Detectar Versão do Java no Gradle
-        if: steps.set_type.outputs.project_type == 'gradle'
-        id: detect_gradle
+      # Para Gradle: extrai a versão do Java do gradle.properties, se definido, ou usa 11
+      - name: Detectar Versão do Java (Gradle)
+        if: env.build_tool == 'gradle'
+        id: detect_java_gradle
         run: |
-          # Seleciona o arquivo de build (Groovy ou Kotlin DSL)
-          if [ -f "build.gradle" ]; then
-            FILE="build.gradle"
-          elif [ -f "build.gradle.kts" ]; then
-            FILE="build.gradle.kts"
+          if [ -f "gradle.properties" ]; then
+            JAVA_VERSION=$(grep -oPm1 "(?<=^javaVersion=)[^[:space:]]+" gradle.properties || echo "11")
+            echo "Versão do Java detectada: $JAVA_VERSION"
+            echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
           else
-            echo "Arquivo de build Gradle não encontrado."
-            exit 1
-          fi
-          echo "Usando arquivo: $FILE"
-
-          # Tenta extrair pela seção compileOptions
-          RAW=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" "$FILE" | head -n1)
-          if [ -z "$RAW" ]; then
-            echo "Não encontrou versão em compileOptions."
-            # Tenta extrair no bloco defaultConfig pela propriedade minSdk
-            RAW=$(grep -oP "(?<=minSdk\s*=\s*[\"'])[0-9]+(?=[\"'])" "$FILE" | head -n1)
-            if [ -n "$RAW" ]; then
-              echo "Encontrou minSdk no defaultConfig: $RAW"
-            fi
-          else
-            echo "Encontrou em compileOptions: $RAW"
+            echo "gradle.properties não encontrado. Usando valor padrão 11."
+            echo "java_version=11" >> $GITHUB_OUTPUT
           fi
 
-          if [ -z "$RAW" ]; then
-            echo "Nenhuma versão do Java encontrada; utilizando fallback multi."
-            DETECTED="multi"
-          else
-            # Se RAW estiver no padrão "JavaVersion.VERSION_xx", extrai o número.
-            if [[ "$RAW" == JavaVersion.VERSION_* ]]; then
-              MAJOR=$(echo "$RAW" | sed -E 's/.*VERSION_([0-9]+)[_.]?.*/\1/')
-              MINOR=$(echo "$RAW" | sed -E 's/.*VERSION_[0-9]+[_.]?([0-9]*)/\1/')
-              if [ "$MAJOR" = "1" ] && [ -n "$MINOR" ]; then
-                DETECTED="$MINOR"
-              else
-                DETECTED="$MAJOR"
-              fi
-            else
-              DETECTED="$RAW"
-            fi
-          fi
-
-          echo "Versão detectada: $DETECTED"
-          if [ "$DETECTED" = "multi" ]; then
-            MATRIX='[7,17,21]'
-            echo "::set-output name=detected_mode::multi"
-          else
-            MATRIX="[\"$DETECTED\"]"
-            echo "::set-output name=detected_mode::single"
-          fi
-          echo "Matrix para JDK: $MATRIX"
-          echo "::set-output name=gradle_matrix::$MATRIX"
-
-  build-maven:
-    needs: detect
-    if: needs.detect.outputs.project_type == 'maven'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout do Código
-        uses: actions/checkout@v4
-      - name: Configurar JDK para Maven
+      # Configurar JDK e cache para Maven
+      - name: Configurar JDK e Maven
+        if: env.build_tool == 'maven'
         uses: actions/setup-java@v3
         with:
-          java-version: ${{ needs.detect.outputs.maven_java }}
-          distribution: temurin
+          java-version: ${{ steps.detect_java_maven.outputs.java_version }}
+          distribution: 'temurin'
           cache: maven
-      - name: Build Maven
+
+      # Configurar JDK e cache para Gradle
+      - name: Configurar JDK e Gradle
+        if: env.build_tool == 'gradle'
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ steps.detect_java_gradle.outputs.java_version }}
+          distribution: 'temurin'
+          cache: gradle
+
+      # Compilar Projeto Maven
+      - name: Compilar Projeto Maven
+        if: env.build_tool == 'maven'
         run: mvn clean package
 
-  build-gradle:
-    needs: detect
-    if: needs.detect.outputs.project_type == 'gradle'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        jdk: ${{ fromJson(needs.detect.outputs.gradle_matrix) }}
-    steps:
-      - name: Checkout do Código
-        uses: actions/checkout@v4
-      - name: Configurar JDK ${{ matrix.jdk }}
-        uses: actions/setup-java@v3
-        with:
-          java-version: ${{ matrix.jdk }}
-          distribution: temurin
-          cache: gradle
-      # Se a detecção foi "single", executa o build.
-      - name: Build Gradle
-        if: ${{ needs.detect.outputs.detected_mode == 'single' }}
+      # Compilar Projeto Gradle
+      - name: Compilar Projeto Gradle
+        if: env.build_tool == 'gradle'
         run: |
-          chmod +x gradlew
-          ./gradlew clean build
-      # Se estiver em fallback ("multi"), apenas instala os JDKs sem executar o build.
-      - name: Instalar JDK (Fallback Mode - Não executa build)
-        if: ${{ needs.detect.outputs.detected_mode == 'multi' }}
-        run: echo "Fallback mode ativo: JDK ${{ matrix.jdk }} instalado; build não executado."
+          echo "Compilando projeto Gradle..."
+          if [ -f "./gradlew" ]; then
+            chmod +x gradlew
+            ./gradlew clean build
+          else
+            gradle clean build
+          fi
 
-  autopack:
-    needs: detect
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout do Código
-        uses: actions/checkout@v4
-      - name: Preparar Artefatos para Veracode
+      # Instala CLI do Veracode e empacota os artefatos para análise
+      - name: Instalar CLI do Veracode e Autopack-Veracode
         run: |
-          mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-          if [ -d "target" ]; then
-            OUTPUT_DIR="target"
-          elif [ -d "build/libs" ]; then
-            OUTPUT_DIR="build/libs"
-          else
-            OUTPUT_DIR="."
+          ARTIFACT_DIR="${{ github.workspace }}/artifacts/${{ inputs.build-id }}"
+          mkdir -p "$ARTIFACT_DIR"
+      
+          if [ "${{ env.build_tool }}" = "maven" ]; then
+            WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+            JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+          elif [ "${{ env.build_tool }}" = "gradle" ]; then
+            WAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.war" | head -n 1)
+            JAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.jar" | head -n 1)
           fi
-          WAR_FILE=$(find $OUTPUT_DIR -maxdepth 1 -name "*.war" | head -n 1)
-          JAR_FILE=$(find $OUTPUT_DIR -maxdepth 1 -name "*.jar" | head -n 1)
-          echo "Arquivos encontrados: WAR: $WAR_FILE, JAR: $JAR_FILE"
+      
           if [ -f "$WAR_FILE" ]; then
-            cp "$WAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
+            echo "WAR encontrado: $WAR_FILE"
+            cp "$WAR_FILE" "$ARTIFACT_DIR/application.war"
           elif [ -f "$JAR_FILE" ]; then
-            cp "$JAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
+            echo "JAR encontrado: $JAR_FILE"
+            cp "$JAR_FILE" "$ARTIFACT_DIR/application.jar"
           else
-            echo "Nenhum WAR ou JAR encontrado. Executando Autopack..."
+            echo "Nenhum WAR, JAR ou ZIP encontrado. Rodando Autopack..."
             curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-            ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
-            find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" |
-              while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
-            rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
-            zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-            mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+            ./veracode package --source . --output "$ARTIFACT_DIR" --trust
+      
+            find "$ARTIFACT_DIR" -name "*.zip" | while read filename; do 
+              unzip -o -d "$(dirname "$filename")" "$filename"
+            done
+      
+            rm -rf "$ARTIFACT_DIR"/*.zip
+            zip analysisPack.zip -r "$ARTIFACT_DIR"
+            mv analysisPack.zip "$ARTIFACT_DIR/analysisPack.zip"
           fi
+
       - name: Publicar Artefato para Análise
         uses: actions/upload-artifact@v4
         with:
@@ -201,12 +147,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Executar Veracode SCA
         continue-on-error: true
         env:
           SRCCLR_API_TOKEN: ${{ secrets.SCA }}
         run: |
-          curl -sSL https://download.sourceclear.com/ci.sh | bash -s – scan --update-advisor --allow-dirty
+          curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
 
   pipeline_scan:
     runs-on: ubuntu-latest
@@ -216,18 +163,23 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: analysisPack
+
       - name: Baixar Veracode Pipeline Scanner
         run: curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+
       - name: Extrair Veracode Pipeline Scanner
         run: unzip pipeline-scan-LATEST.zip -d ${{ github.workspace }}/scanner
+
       - name: Executar Veracode Pipeline Scan
         id: pipeline_scan
         env:
           VID: ${{ secrets.APIID_VERACODE }}
           VKEY: ${{ secrets.APIKEY_VERACODE }}
         run: |
+          # Procura pelo arquivo WAR ou JAR (excluindo pipeline-scan.jar)
           WAR_FILE=$(find . -name "*.war" | head -n 1)
           JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
+          
           if [ -f "$WAR_FILE" ]; then
             echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
             java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
@@ -253,9 +205,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: analysisPack
+
       - name: Baixar Veracode SAST Wrapper
         run: |
           curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
       - name: Executar Veracode SAST
         env:
           VID: ${{ secrets.APIID_VERACODE }}
@@ -275,7 +229,7 @@ jobs:
               echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
               ARTIFACT="analysisPack.zip"
             fi
-          fi
+          
           if [ "$ENVIRONMENT" == "prod" ]; then
             echo "Executando SAST em ambiente de produção..."
             java -jar vosp-api-wrappers-java-24.7.14.0.jar \
