@@ -16,159 +16,140 @@ on:
         required: true
         type: string
 
-env:
-  project: ${{ inputs.project_veracode }}
-  environment: ${{ inputs.environment }}
-
 jobs:
-  autopack:
+  detect:
     runs-on: ubuntu-latest
-
+    outputs:
+      project_type: ${{ steps.set_type.outputs.project_type }}
+      gradle_matrix: ${{ steps.detect_gradle.outputs.gradle_matrix }}
+      maven_java: ${{ steps.detect_maven.outputs.maven_java }}
     steps:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
-      # Detecta se é um projeto Maven (verificando a existência do pom.xml)
-      - name: Detectar Projeto Java-Maven
-        id: check_maven
+      # Define o tipo de projeto (maven ou gradle) com base nos arquivos encontrados.
+      - name: Definir Tipo de Projeto
+        id: set_type
         run: |
           if [ -f "pom.xml" ]; then
-            echo "java_maven=true" >> $GITHUB_ENV
+            echo "::set-output name=project_type::maven"
+          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+            echo "::set-output name=project_type::gradle"
           else
-            echo "java_maven=false" >> $GITHUB_ENV
+            echo "Nenhum arquivo de projeto conhecido encontrado."
+            exit 1
           fi
 
-      # Detecta se é um projeto Gradle (verificando a existência de build.gradle ou build.gradle.kts)
-      - name: Detectar Projeto Java-Gradle
-        id: check_gradle
+      # Se for Maven, extrai a versão do Java do pom.xml.
+      - name: Detectar Versão do Java no pom.xml
+        if: steps.set_type.outputs.project_type == 'maven'
+        id: detect_maven
         run: |
-          if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-            echo "java_gradle=true" >> $GITHUB_ENV
-          else
-            echo "java_gradle=false" >> $GITHUB_ENV
-          fi
-
-      # Para projetos Maven: extrai a versão do Java definida no pom.xml
-      - name: Detectar versão do Java no pom.xml
-        if: env.java_maven == 'true'
-        id: detect_java_maven
-        run: |
-          # Tenta extrair o valor da tag <maven.compiler.source>; se não encontrar, usa "11"
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          echo "Versão do Java detectada (Maven): $JAVA_VERSION"
-          echo "java_version_maven=$JAVA_VERSION" >> $GITHUB_OUTPUT
+          echo "Maven Java Version: $JAVA_VERSION"
+          echo "::set-output name=maven_java::$JAVA_VERSION"
 
-      # Para projetos Gradle: tenta extrair a versão do Java a partir de duas fontes:
-      # 1. Pelo padrão em compileOptions (sourceCompatibility = JavaVersion.VERSION_xx)
-      # 2. Se não encontrado, busca por uma propriedade javaVersion (por exemplo, em defaultConfig)
-      # Além disso, se for projeto Android (detectado pelo bloco "android {"), forçamos o mínimo para 17.
-      - name: Detectar versão do Java no Gradle
-        if: env.java_gradle == 'true'
-        id: detect_java_gradle
+      # Se for Gradle, tenta extrair a versão do Java em duas fontes:
+      # 1. Pela seção compileOptions (sourceCompatibility = JavaVersion.VERSION_xx)
+      # 2. Se não encontrar, busca no bloco defaultConfig por uma propriedade (usamos minSdk como exemplo)
+      # Se nada for encontrado, definirá um fallback multi (matrix com 7, 17 e 21)
+      - name: Detectar Versão do Java no Gradle
+        if: steps.set_type.outputs.project_type == 'gradle'
+        id: detect_gradle
         run: |
+          # Seleciona o arquivo de build (Groovy ou Kotlin DSL)
           if [ -f "build.gradle" ]; then
-            RAW_VERSION=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" build.gradle | head -n1)
-            if [ -z "$RAW_VERSION" ]; then
-              # Tenta buscar por uma propriedade javaVersion, por exemplo: javaVersion = "11"
-              RAW_VERSION=$(grep -oP "(?<=javaVersion\s*=\s*['\"])\d+(?=['\"])" build.gradle | head -n1)
-            fi
-            ANDROID_DETECTED=$(grep -qi "android\s*{" build.gradle && echo "true" || echo "false")
+            FILE="build.gradle"
           elif [ -f "build.gradle.kts" ]; then
-            RAW_VERSION=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" build.gradle.kts | head -n1)
-            if [ -z "$RAW_VERSION" ]; then
-              RAW_VERSION=$(grep -oP "(?<=javaVersion\s*=\s*['\"])\d+(?=['\"])" build.gradle.kts | head -n1)
-            fi
-            ANDROID_DETECTED=$(grep -qi "android\s*{" build.gradle.kts && echo "true" || echo "false")
+            FILE="build.gradle.kts"
           else
-            RAW_VERSION=""
-            ANDROID_DETECTED="false"
+            echo "Arquivo de build Gradle não encontrado."
+            exit 1
           fi
 
-          # Se RAW_VERSION estiver no padrão "sourceCompatibility = JavaVersion.VERSION_xx", extrai os números.
-          if [[ "$RAW_VERSION" == JavaVersion.VERSION_* ]]; then
-            MAJOR=$(echo "$RAW_VERSION" | sed -E 's/.*VERSION_([0-9]+)[_.]?.*/\1/')
-            MINOR=$(echo "$RAW_VERSION" | sed -E 's/.*VERSION_[0-9]+[_.]?([0-9]*)/\1/')
-            if [ "$MAJOR" = "1" ] && [ -n "$MINOR" ]; then
-              JAVA_VERSION="$MINOR"
-            else
-              JAVA_VERSION="$MAJOR"
+          echo "Usando arquivo: $FILE"
+
+          # Tenta extrair pela seção compileOptions:
+          RAW=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" "$FILE" | head -n1)
+          if [ -z "$RAW" ]; then
+            echo "Não encontrou versão em compileOptions."
+            # Tenta extrair no bloco defaultConfig pela propriedade minSdk (por exemplo: minSdk = "21")
+            RAW=$(sed -n '/defaultConfig {/,/}/{s/.*minSdk\s*=\s*["'\'']\K[0-9]+(?=["'\'']).*/p' "$FILE" | head -n1)
+            if [ -n "$RAW" ]; then
+              echo "Encontrou minSdk no defaultConfig: $RAW"
             fi
           else
-            # Se RAW_VERSION já for apenas um número (por exemplo, extraído de javaVersion), use-o.
-            JAVA_VERSION="$RAW_VERSION"
+            echo "Encontrou em compileOptions: $RAW"
           fi
 
-          if [ -z "$JAVA_VERSION" ]; then
-            JAVA_VERSION="11"
-          fi
-
-          # Se for um projeto Android, forçamos o mínimo para 17.
-          if [ "$ANDROID_DETECTED" = "true" ]; then
-            if [ "$JAVA_VERSION" -lt 17 ]; then
-              echo "Projeto Android detectado – forçando versão mínima do JDK para 17."
-              JAVA_VERSION=17
-            fi
-          fi
-
-          # Validação: se a versão não estiver entre as permitidas (7, 11, 17 ou 21), usamos um valor padrão.
-          ALLOWED_VERSIONS=("7" "11" "17" "21")
-          VALID="false"
-          for v in "${ALLOWED_VERSIONS[@]}"; do
-            if [ "$JAVA_VERSION" = "$v" ]; then
-              VALID="true"
-              break
-            fi
-          done
-
-          if [ "$VALID" = "false" ]; then
-            if [ "$ANDROID_DETECTED" = "true" ]; then
-              echo "Projeto Android ou versão não suportada ($JAVA_VERSION) – forçando JDK 17."
-              JAVA_VERSION="17"
+          if [ -z "$RAW" ]; then
+            echo "Nenhuma versão do Java encontrada; utilizando fallback multi."
+            DETECTED="multi"
+          else
+            # Se RAW estiver no padrão "JavaVersion.VERSION_xx", extrai o número.
+            if [[ "$RAW" == JavaVersion.VERSION_* ]]; then
+              MAJOR=$(echo "$RAW" | sed -E 's/.*VERSION_([0-9]+)[_.]?.*/\1/')
+              MINOR=$(echo "$RAW" | sed -E 's/.*VERSION_[0-9]+[_.]?([0-9]*)/\1/')
+              if [ "$MAJOR" = "1" ] && [ -n "$MINOR" ]; then
+                DETECTED="$MINOR"
+              else
+                DETECTED="$MAJOR"
+              fi
             else
-              echo "Versão do Java não suportada ($JAVA_VERSION) – utilizando JDK 11 como padrão."
-              JAVA_VERSION="11"
+              # RAW já é apenas um número (extraído de minSdk, por exemplo)
+              DETECTED="$RAW"
             fi
           fi
 
-          echo "Versão do Java detectada (Gradle): $JAVA_VERSION"
-          echo "java_version_gradle=$JAVA_VERSION" >> $GITHUB_OUTPUT
+          echo "Versão detectada: $DETECTED"
 
-      # Configura o JDK para projetos Maven (usando a versão detectada) e instala as dependências
-      - name: Configurar JDK para Maven e instalar dependências
-        if: env.java_maven == 'true'
+          # Se não foi encontrada uma versão válida, define fallback multi.
+          if [ "$DETECTED" = "multi" ]; then
+            MATRIX='[7,17,21]'
+          else
+            MATRIX="[\"$DETECTED\"]"
+          fi
+
+          echo "Matrix para JDK: $MATRIX"
+          echo "::set-output name=gradle_matrix::$MATRIX"
+
+  build-maven:
+    needs: detect
+    if: needs.detect.outputs.project_type == 'maven'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK para Maven
         uses: actions/setup-java@v3
         with:
-          java-version: ${{ steps.detect_java_maven.outputs.java_version_maven }}
+          java-version: ${{ needs.detect.outputs.maven_java }}
           distribution: temurin
           cache: maven
 
-      - name: Instalar dependências Maven
-        if: env.java_maven == 'true'
-        run: mvn dependency:resolve
+      - name: Build Maven
+        run: mvn clean package
 
-      # Configura o JDK para projetos Gradle (usando a versão detectada) e instala as dependências
-      - name: Configurar JDK para Gradle e instalar dependências
-        if: env.java_gradle == 'true'
+  build-gradle:
+    needs: detect
+    if: needs.detect.outputs.project_type == 'gradle'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        jdk: ${{ fromJson(needs.detect.outputs.gradle_matrix) }}
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK ${{ matrix.jdk }}
         uses: actions/setup-java@v3
         with:
-          java-version: ${{ steps.detect_java_gradle.outputs.java_version_gradle }}
+          java-version: ${{ matrix.jdk }}
           distribution: temurin
           cache: gradle
 
-      - name: Instalar dependências Gradle
-        if: env.java_gradle == 'true'
-        run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon dependencies
-
-      # Build do projeto Maven
-      - name: Compilar Projeto Maven
-        if: env.java_maven == 'true'
-        run: mvn clean package
-
-      # Build do projeto Gradle
-      - name: Compilar Projeto Gradle
-        if: env.java_gradle == 'true'
+      - name: Build Gradle
         run: |
           chmod +x gradlew
           ./gradlew clean build
