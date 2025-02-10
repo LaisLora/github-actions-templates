@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
 
-      # Se for Maven, extrai a versão do Java do pom.xml.
+      # Para projetos Maven: extrai a versão do Java do pom.xml.
       - name: Detectar Versão do Java no pom.xml
         if: steps.set_type.outputs.project_type == 'maven'
         id: detect_maven
@@ -50,7 +50,7 @@ jobs:
           echo "Maven Java Version: $JAVA_VERSION"
           echo "::set-output name=maven_java::$JAVA_VERSION"
 
-      # Se for Gradle, tenta extrair a versão do Java de duas fontes:
+      # Para projetos Gradle: tenta extrair a versão do Java de duas fontes:
       # 1. Pela seção compileOptions (ex.: sourceCompatibility = JavaVersion.VERSION_1_8)
       # 2. Se não encontrar, busca no bloco defaultConfig pela propriedade (ex.: minSdk = "21")
       # Se ainda não identificar, define o fallback multi (matrix com JDKs 7, 17 e 21).
@@ -73,8 +73,9 @@ jobs:
           RAW=$(grep -oP "sourceCompatibility\s*=\s*JavaVersion\.VERSION_(\d+(?:[_\.]\d+)?)" "$FILE" | head -n1)
           if [ -z "$RAW" ]; then
             echo "Não encontrou versão em compileOptions."
-            # Tenta extrair no bloco defaultConfig pela propriedade minSdk
-            RAW=$(grep -oP "(?<=minSdk\s*=\s*['\"])[0-9]+(?=['\"])" "$FILE" | head -n1)
+            # Tenta extrair no bloco defaultConfig pela propriedade minSdk.
+            # Utilizamos uma expressão regular com aspas simples e escape para inserir uma aspa dupla.
+            RAW=$(grep -oP '(?<=minSdk\s*=\s*["'"'"'])[0-9]+(?=["'"'"'])' "$FILE" | head -n1)
             if [ -n "$RAW" ]; then
               echo "Encontrou minSdk no defaultConfig: $RAW"
             fi
@@ -300,4 +301,3 @@ jobs:
               -createsandbox true \
               -sandboxname "$ENVIRONMENT"
           fi
-
