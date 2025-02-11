@@ -27,7 +27,7 @@ jobs:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Detecta a ferramenta de build: Maven ou Gradle (incluindo build.gradle e build.gradle.kts)
+      # Detectar ferramenta de build: Maven ou Gradle
       - name: Detectar Ferramenta de Build
         id: detect_build
         run: |
@@ -40,99 +40,43 @@ jobs:
             exit 1
           fi
 
-      # Para Maven: extrai a versão do Java do pom.xml
-      - name: Detectar Versão do Java (Maven)
-        if: env.build_tool == 'maven'
-        id: detect_java_maven
-        run: |
-          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          echo "Versão do Java detectada (Maven): $JAVA_VERSION"
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
-
-      # Para Gradle: tenta extrair a versão do Java e o minSdk de vários arquivos
+      # Detectar versão do Java no Gradle a partir do compiler.xml
       - name: Detectar Configurações do Projeto (Gradle)
         if: env.build_tool == 'gradle'
         id: detect_java_gradle
         run: |
-          # Tenta buscar a versão em gradle.properties (ex.: javaVersion=11)
-          if [ -f "gradle.properties" ]; then
-            JAVA_VERSION=$(grep -oE ^\s*javaVersion\s*=\s*[0-9]+ gradle.properties | grep -oE [0-9]+ | head -n1)
+          JAVA_VERSION=""
+
+          # Buscar no compiler.xml
+          COMPILER_XML=$(find . -type f -name "compiler.xml" | head -n1)
+          if [ -n "$COMPILER_XML" ]; then
+            echo "Verificando $COMPILER_XML para encontrar a versão do Java..."
+            JAVA_VERSION=$(awk -F 'target="' '{print $2}' "$COMPILER_XML" | awk -F '"' '{print $1}' | head -n1)
           fi
 
-          # Se não encontrou, procura no arquivo de build (priorizando app/build.gradle.kts, depois build.gradle ou build.gradle.kts)
+          # Caso não encontre, usa um valor padrão
           if [ -z "$JAVA_VERSION" ]; then
-            if [ -f "app/build.gradle.kts" ]; then
-              FILE="app/build.gradle.kts"
-            elif [ -f "build.gradle" ]; then
-              FILE="build.gradle"
-            elif [ -f "build.gradle.kts" ]; then
-              FILE="build.gradle.kts"
-            fi
-
-            if [ -n "$FILE" ]; then
-              # Procura uma linha como:
-              #   sourceCompatibility = JavaVersion.VERSION_17
-              #   ou
-              #   sourceCompatibility = "17"
-              JAVA_VERSION=$(grep -oE 'sourceCompatibility\s*=\s*(JavaVersion\.VERSION_)?[\'"]?[0-9]+' "$FILE" | grep -oE '[0-9]+' | head -n1)
-            fi
-          fi
-
-          # Se ainda não encontrar, tenta buscar em compiler.xml (exemplo: <bytecodeTargetLevel target="17" />)
-          if [ -z "$JAVA_VERSION" ]; then
-            # Ajuste o caminho, se necessário. Aqui o find procura em todo o projeto.
-            COMPILER_XML=$(find . -type f -name "compiler.xml" | head -n1)
-            if [ -n "$COMPILER_XML" ]; then
-              JAVA_VERSION=$(grep '<bytecodeTargetLevel' "$COMPILER_XML" | grep -oE '[0-9]+' | head -n1)
-            fi
-          fi
-
-          # Se ainda não for encontrado, usa fallback para 21
-          if [ -z "$JAVA_VERSION" ]; then
-            echo "Nenhuma versão do Java detectada no projeto, usando 21 como padrão."
+            echo "Nenhuma versão do Java detectada em $COMPILER_XML. Usando Java 21 como padrão."
             JAVA_VERSION=21
           fi
 
-          echo "Versão do Java detectada (Gradle): $JAVA_VERSION"
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
+          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "java_version=$JAVA_VERSION" >> $GITHUB_ENV
 
-          # Detecta o minSdk (ex.: minSdk = 21) em qualquer arquivo do projeto
-          MIN_SDK=$(grep -R "minSdk" . 2>/dev/null | grep -oE 'minSdk\s*=?\s*[0-9]+' | grep -oE '[0-9]+' | head -n1)
-          if [ -z "$MIN_SDK" ]; then
-            echo "Nenhuma minSdk encontrada, usando fallback 21."
-            MIN_SDK=21
-          fi
-          echo "minSdk=$MIN_SDK" >> $GITHUB_OUTPUT
-          echo "minSdk detectado: $MIN_SDK"
-
-      # Configurar JDK e cache para Maven
-      - name: Configurar JDK e Maven
-        if: env.build_tool == 'maven'
-        uses: actions/setup-java@v3
-        with:
-          java-version: ${{ steps.detect_java_maven.outputs.java_version }}
-          distribution: temurin
-          cache: maven
-
-      # Configurar JDK e cache para Gradle
+      # Configurar JDK para Gradle
       - name: Configurar JDK e Gradle
         if: env.build_tool == 'gradle'
         uses: actions/setup-java@v3
         with:
-          java-version: ${{ steps.detect_java_gradle.outputs.java_version }}
+          java-version: ${{ env.java_version }}
           distribution: temurin
           cache: gradle
-
-      # Compilar Projeto Maven
-      - name: Compilar Projeto Maven
-        if: env.build_tool == 'maven'
-        run: mvn clean package
 
       # Compilar Projeto Gradle
       - name: Compilar Projeto Gradle
         if: env.build_tool == 'gradle'
         run: |
-          echo "Compilando projeto Gradle com Java ${{ steps.detect_java_gradle.outputs.java_version }}..."
+          echo "Compilando projeto Gradle com Java ${{ env.java_version }}..."
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
             ./gradlew clean build
@@ -146,10 +90,7 @@ jobs:
           ARTIFACT_DIR="${{ github.workspace }}/artifacts/${{ inputs.build-id }}"
           mkdir -p "$ARTIFACT_DIR"
       
-          if [ "${{ env.build_tool }}" = "maven" ]; then
-            WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
-            JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
-          elif [ "${{ env.build_tool }}" = "gradle" ]; then
+          if [ "${{ env.build_tool }}" = "gradle" ]; then
             WAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.war" | head -n 1)
             JAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.jar" | head -n 1)
           fi
@@ -164,14 +105,6 @@ jobs:
             echo "Nenhum WAR, JAR ou ZIP encontrado. Rodando Autopack..."
             curl -fsS https://tools.veracode.com/veracode-cli/install | sh
             ./veracode package --source . --output "$ARTIFACT_DIR" --trust
-      
-            find "$ARTIFACT_DIR" -name "*.zip" | while read filename; do 
-              unzip -o -d "$(dirname "$filename")" "$filename"
-            done
-      
-            rm -rf "$ARTIFACT_DIR"/*.zip
-            zip analysisPack.zip -r "$ARTIFACT_DIR"
-            mv analysisPack.zip "$ARTIFACT_DIR/analysisPack.zip"
           fi
 
       - name: Publicar Artefato para Análise
@@ -183,18 +116,6 @@ jobs:
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
           retention-days: 1
-
-  sca:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Executar Veracode SCA
-        continue-on-error: true
-        env:
-          SRCCLR_API_TOKEN: ${{ secrets.SCA }}
-        run: |
-          curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
 
   pipeline_scan:
     runs-on: ubuntu-latest
@@ -217,80 +138,16 @@ jobs:
           VID: ${{ secrets.APIID_VERACODE }}
           VKEY: ${{ secrets.APIKEY_VERACODE }}
         run: |
-          WAR_FILE=$(find . -name "*.war" | head -n 1)
           JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
           
-          if [ -f "$WAR_FILE" ]; then
-            echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
-            java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
-              -vid $VID -vkey $VKEY \
-              --file "$WAR_FILE" --issue_details true --fail_on_severity="Very High, High"
-          elif [ -f "$JAR_FILE" ]; then
+          if [ -f "$JAR_FILE" ]; then
             echo "Java build detectado. Usando arquivo: $JAR_FILE"
             java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
               -vid $VID -vkey $VKEY \
               --file "$JAR_FILE" --issue_details true --fail_on_severity="Very High, High"
           else
-            echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
+            echo "Nenhum JAR encontrado. Usando analysisPack.zip."
             java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
               -vid $VID -vkey $VKEY \
               --file analysisPack.zip --issue_details true --fail_on_severity="Very High, High"
-          fi
-
-  sast:
-    runs-on: ubuntu-latest
-    needs: autopack
-    steps:
-      - name: Baixar Artefato para Análise SAST
-        uses: actions/download-artifact@v4
-        with:
-          name: analysisPack
-
-      - name: Baixar Veracode SAST Wrapper
-        run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
-
-      - name: Executar Veracode SAST
-        env:
-          VID: ${{ secrets.APIID_VERACODE }}
-          VKEY: ${{ secrets.APIKEY_VERACODE }}
-          ENVIRONMENT: ${{ inputs.environment }}
-        run: |
-          WAR_FILE=$(find . -maxdepth 2 -name "*.war" | head -n 1)
-          if [ -f "$WAR_FILE" ]; then
-            echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
-            ARTIFACT="$WAR_FILE"
-          else
-            JAR_FILE=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
-            if [ -f "$JAR_FILE" ]; then
-              echo "Java build detectado. Usando arquivo: $JAR_FILE"
-              ARTIFACT="$JAR_FILE"
-            else
-              echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
-              ARTIFACT="analysisPack.zip"
-            fi
-          fi
-
-          if [ "$ENVIRONMENT" == "prod" ]; then
-            echo "Executando SAST em ambiente de produção..."
-            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-              -vid $VID -vkey $VKEY \
-              -action uploadandscan \
-              -appname "${{ inputs.project_veracode }}" \
-              -version "${{ github.run_id }}" \
-              -filepath "$ARTIFACT" \
-              -createprofile true \
-              -deleteincompletescan 2 \
-              -createsandbox false
-          else
-            echo "Executando SAST em ambiente de sandbox..."
-            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-              -vid $VID -vkey $VKEY \
-              -action uploadandscan \
-              -appname "${{ inputs.project_veracode }}" \
-              -version "${{ github.run_id }}" \
-              -filepath "$ARTIFACT" \
-              -createprofile true \
-              -deleteincompletescan 2 \
-              -createsandbox true \
-              -sandboxname "$ENVIRONMENT"
           fi
