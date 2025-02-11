@@ -56,7 +56,7 @@ jobs:
         run: |
           # Tenta buscar a versão em gradle.properties (ex.: javaVersion=11)
           if [ -f "gradle.properties" ]; then
-            JAVA_VERSION=$(grep -oP '^\s*javaVersion\s*=\s*\K\d+' gradle.properties | head -n1)
+            JAVA_VERSION=$(grep -oE '^\s*javaVersion\s*=\s*[0-9]+' gradle.properties | grep -oE '[0-9]+' | head -n1)
           fi
 
           # Se não encontrou, procura no arquivo de build (priorizando app/build.gradle.kts, depois build.gradle ou build.gradle.kts)
@@ -70,7 +70,11 @@ jobs:
             fi
 
             if [ -n "$FILE" ]; then
-              JAVA_VERSION=$(grep -oP 'sourceCompatibility\s*=\s*(?:JavaVersion\.VERSION_)?[\'"]?\K\d+' "$FILE" | head -n1)
+              # Procura uma linha como:
+              #   sourceCompatibility = JavaVersion.VERSION_17
+              #   ou
+              #   sourceCompatibility = "17"
+              JAVA_VERSION=$(grep -oE 'sourceCompatibility\s*=\s*(JavaVersion\.VERSION_)?[\'"]?[0-9]+' "$FILE" | grep -oE '[0-9]+' | head -n1)
             fi
           fi
 
@@ -79,7 +83,7 @@ jobs:
             # Ajuste o caminho, se necessário. Aqui o find procura em todo o projeto.
             COMPILER_XML=$(find . -type f -name "compiler.xml" | head -n1)
             if [ -n "$COMPILER_XML" ]; then
-              JAVA_VERSION=$(grep -oP '<bytecodeTargetLevel\s+target="?\K\d+' "$COMPILER_XML" | head -n1)
+              JAVA_VERSION=$(grep -oE '<bytecodeTargetLevel\s+target="?([0-9]+)"?' "$COMPILER_XML" | grep -oE '[0-9]+' | head -n1)
             fi
           fi
 
@@ -93,7 +97,7 @@ jobs:
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
           # Detecta o minSdk (ex.: minSdk = 21) em qualquer arquivo do projeto
-          MIN_SDK=$(grep -R "minSdk" . 2>/dev/null | grep -oP 'minSdk\s*=?\s*\K\d+' | head -n1)
+          MIN_SDK=$(grep -R "minSdk" . 2>/dev/null | grep -oE 'minSdk\s*=?\s*[0-9]+' | grep -oE '[0-9]+' | head -n1)
           if [ -z "$MIN_SDK" ]; then
             echo "Nenhuma minSdk encontrada, usando fallback 21."
             MIN_SDK=21
