@@ -23,12 +23,11 @@ env:
 jobs:
   autopack:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Detecta a ferramenta de build: Maven ou Gradle (incluindo build.gradlew.kst)
+      # Detecta a ferramenta de build: Maven ou Gradle (incluindo build.gradle e build.gradle.kts)
       - name: Detectar Ferramenta de Build
         id: detect_build
         run: |
@@ -47,34 +46,60 @@ jobs:
         id: detect_java_maven
         run: |
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "Versão do Java detectada (Maven): $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
-      # Para Gradle: tenta extrair a versão do Java de gradle.properties ou do build.gradle (defaultConfig)
-      - name: Detectar Versão do Java (Gradle)
+      # Para Gradle: tenta extrair a versão do Java e o minSdk de vários arquivos
+      - name: Detectar Configurações do Projeto (Gradle)
         if: env.build_tool == 'gradle'
         id: detect_java_gradle
         run: |
-          # Tenta extrair a versão definida em gradle.properties
+          # Tenta buscar a versão em gradle.properties (ex.: javaVersion=11)
           if [ -f "gradle.properties" ]; then
-            JAVA_VERSION=$(grep -oPm1 "(?<=^javaVersion=)[^[:space:]]+" gradle.properties || echo "")
+            JAVA_VERSION=$(grep -oP '^\s*javaVersion\s*=\s*\K\d+' gradle.properties | head -n1)
           fi
-          # Se não encontrou, tenta detectar se há o bloco defaultConfig no build.gradle e assume 11
+
+          # Se não encontrou, procura no arquivo de build (priorizando app/build.gradle.kts, depois build.gradle ou build.gradle.kts)
           if [ -z "$JAVA_VERSION" ]; then
-            if grep -q "defaultConfig" build.gradle; then
-              echo "defaultConfig encontrada no build.gradle. Usando javaVersion=11 como padrão."
-              JAVA_VERSION=11
+            if [ -f "app/build.gradle.kts" ]; then
+              FILE="app/build.gradle.kts"
+            elif [ -f "build.gradle" ]; then
+              FILE="build.gradle"
+            elif [ -f "build.gradle.kts" ]; then
+              FILE="build.gradle.kts"
+            fi
+
+            if [ -n "$FILE" ]; then
+              JAVA_VERSION=$(grep -oP 'sourceCompatibility\s*=\s*(?:JavaVersion\.VERSION_)?[\'"]?\K\d+' "$FILE" | head -n1)
             fi
           fi
-          # Se ainda não encontrou, instala os JDKs disponíveis e define 11 como padrão
+
+          # Se ainda não encontrar, tenta buscar em compiler.xml (exemplo: <bytecodeTargetLevel target="17" />)
           if [ -z "$JAVA_VERSION" ]; then
-            echo "Nenhuma versão de Java detectada. Instalando versões fallback: openjdk-11, openjdk-17 e openjdk-21."
-            sudo apt-get update
-            sudo apt-get install -y openjdk-11-jdk openjdk-17-jdk openjdk-21-jdk
-            JAVA_VERSION=11
+            # Ajuste o caminho, se necessário. Aqui o find procura em todo o projeto.
+            COMPILER_XML=$(find . -type f -name "compiler.xml" | head -n1)
+            if [ -n "$COMPILER_XML" ]; then
+              JAVA_VERSION=$(grep -oP '<bytecodeTargetLevel\s+target="?\K\d+' "$COMPILER_XML" | head -n1)
+            fi
           fi
-          echo "Versão do Java detectada: $JAVA_VERSION"
+
+          # Se ainda não for encontrado, usa fallback para 21
+          if [ -z "$JAVA_VERSION" ]; then
+            echo "Nenhuma versão do Java detectada no projeto, usando 21 como padrão."
+            JAVA_VERSION=21
+          fi
+
+          echo "Versão do Java detectada (Gradle): $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
+
+          # Detecta o minSdk (ex.: minSdk = 21) em qualquer arquivo do projeto
+          MIN_SDK=$(grep -R "minSdk" . 2>/dev/null | grep -oP 'minSdk\s*=?\s*\K\d+' | head -n1)
+          if [ -z "$MIN_SDK" ]; then
+            echo "Nenhuma minSdk encontrada, usando fallback 21."
+            MIN_SDK=21
+          fi
+          echo "minSdk=$MIN_SDK" >> $GITHUB_OUTPUT
+          echo "minSdk detectado: $MIN_SDK"
 
       # Configurar JDK e cache para Maven
       - name: Configurar JDK e Maven
@@ -82,7 +107,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           java-version: ${{ steps.detect_java_maven.outputs.java_version }}
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
       # Configurar JDK e cache para Gradle
@@ -91,7 +116,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           java-version: ${{ steps.detect_java_gradle.outputs.java_version }}
-          distribution: 'temurin'
+          distribution: temurin
           cache: gradle
 
       # Compilar Projeto Maven
@@ -103,7 +128,7 @@ jobs:
       - name: Compilar Projeto Gradle
         if: env.build_tool == 'gradle'
         run: |
-          echo "Compilando projeto Gradle..."
+          echo "Compilando projeto Gradle com Java ${{ steps.detect_java_gradle.outputs.java_version }}..."
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
             ./gradlew clean build
@@ -239,7 +264,8 @@ jobs:
               echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
               ARTIFACT="analysisPack.zip"
             fi
-          
+          fi
+
           if [ "$ENVIRONMENT" == "prod" ]; then
             echo "Executando SAST em ambiente de produção..."
             java -jar vosp-api-wrappers-java-24.7.14.0.jar \
