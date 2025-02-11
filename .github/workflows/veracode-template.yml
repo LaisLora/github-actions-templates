@@ -56,7 +56,7 @@ jobs:
         run: |
           # Tenta buscar a versão em gradle.properties (ex.: javaVersion=11)
           if [ -f "gradle.properties" ]; then
-            JAVA_VERSION=$(grep -oE '^\s*javaVersion\s*=\s*[0-9]+' gradle.properties | grep -oE '[0-9]+' | head -n1)
+            JAVA_VERSION=$(grep -oE ^\s*javaVersion\s*=\s*[0-9]+ gradle.properties | grep -oE [0-9]+ | head -n1)
           fi
 
           # Se não encontrou, procura no arquivo de build (priorizando app/build.gradle.kts, depois build.gradle ou build.gradle.kts)
