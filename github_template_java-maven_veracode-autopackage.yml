@@ -88,17 +88,19 @@ jobs:
           # Procura o arquivo compiler.xml no projeto
           COMPILE_XML=$(find . -type f -name "compiler.xml" | head -n1)
           if [ -n "$COMPILE_XML" ]; then
-            # Extrai o valor do target usando cut:
-            # A linha esperada é: <bytecodeTargetLevel target="17" />
+            # Espera uma linha como: <bytecodeTargetLevel target="17" />
             JAVA_VERSION=$(grep "<bytecodeTargetLevel target=" "$COMPILE_XML" | head -n1 | cut -d'"' -f2)
+            echo "Versão do Java encontrada no compiler.xml: $JAVA_VERSION"
+            echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
           fi
-          # Se não encontrar, usa fallback para 21
+          # Se não for encontrado, define um fallback (por exemplo, 21)
           if [ -z "$JAVA_VERSION" ]; then
             echo "Nenhuma versão do Java detectada no compiler.xml, usando 21 como padrão."
             JAVA_VERSION=21
+            echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
           fi
           echo "Versão do Java detectada (Gradle): $JAVA_VERSION"
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
+
 
       - name: Configurar JDK e Gradle
         if: env.java_gradle == 'true'
