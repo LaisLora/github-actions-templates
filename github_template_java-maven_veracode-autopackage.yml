@@ -85,13 +85,14 @@ jobs:
         if: env.java_gradle == 'true'
         id: detect_java_gradle
         run: |
-          # Tenta buscar a versão do Java no compiler.xml
+          # Procura o arquivo compiler.xml no projeto
           COMPILE_XML=$(find . -type f -name "compiler.xml" | head -n1)
           if [ -n "$COMPILE_XML" ]; then
-            JAVA_VERSION=$(sed -n '/<CompilerConfiguration>/,/<\/CompilerConfiguration>/p' "$COMPILE_XML" \
-                           | grep -oE 'target="[0-9]+"' \
-                           | grep -oE '[0-9]+' | head -n1)
+            # Extrai o valor do target usando cut:
+            # A linha esperada é: <bytecodeTargetLevel target="17" />
+            JAVA_VERSION=$(grep "<bytecodeTargetLevel target=" "$COMPILE_XML" | head -n1 | cut -d'"' -f2)
           fi
+          # Se não encontrar, usa fallback para 21
           if [ -z "$JAVA_VERSION" ]; then
             echo "Nenhuma versão do Java detectada no compiler.xml, usando 21 como padrão."
             JAVA_VERSION=21
