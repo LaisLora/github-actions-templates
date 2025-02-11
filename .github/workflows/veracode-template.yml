@@ -83,7 +83,7 @@ jobs:
             # Ajuste o caminho, se necessário. Aqui o find procura em todo o projeto.
             COMPILER_XML=$(find . -type f -name "compiler.xml" | head -n1)
             if [ -n "$COMPILER_XML" ]; then
-              JAVA_VERSION=$(grep -oE '<bytecodeTargetLevel\s+target="?([0-9]+)"?' "$COMPILER_XML" | grep -oE '[0-9]+' | head -n1)
+              JAVA_VERSION=$(grep '<bytecodeTargetLevel' "$COMPILER_XML" | grep -oE '[0-9]+' | head -n1)
             fi
           fi
 
