@@ -204,7 +204,6 @@ jobs:
         run: unzip pipeline-scan-LATEST.zip -d ${{ github.workspace }}/scanner
 
       - name: Executar Veracode Pipeline Scan
-        continue-on-error: true
         id: pipeline_scan
         env:
           VID: ${{ secrets.APIID_VERACODE }}
@@ -214,22 +213,22 @@ jobs:
           WAR_FILE=$(find . -name "*.war" | head -n 1)
           # Procura pelo arquivo JAR (excluindo o pipeline-scan.jar)
           JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
-
+          
           if [ -f "$WAR_FILE" ]; then
             echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
             java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
               -vid $VID -vkey $VKEY \
-              --file "$WAR_FILE" --issue_details true 
+              --file "$WAR_FILE" --issue_details true --fail_on_severity="Very High, High"
           elif [ -f "$JAR_FILE" ]; then
             echo "Java build detectado. Usando arquivo: $JAR_FILE"
             java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
               -vid $VID -vkey $VKEY \
-              --file "$JAR_FILE" --issue_details true 
+              --file "$JAR_FILE" --issue_details true --fail_on_severity="Very High, High"
           else
             echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
             java -jar ${{ github.workspace }}/scanner/pipeline-scan.jar \
               -vid $VID -vkey $VKEY \
-              --file analysisPack.zip --issue_details true 
+              --file analysisPack.zip --issue_details true --fail_on_severity="Very High, High"
           fi
 
   sast:
@@ -267,7 +266,7 @@ jobs:
               ARTIFACT="analysisPack.zip"
             fi
           fi
-
+      
           if [ "$ENVIRONMENT" == "prod" ]; then
             echo "Executando SAST em ambiente de produção..."
             java -jar vosp-api-wrappers-java-24.7.14.0.jar \
