@@ -69,10 +69,26 @@ jobs:
         if: env.java_maven == 'true'
         run: mvn clean package
 
-      # Build para projetos Gradle
+      # Para projetos Gradle, detectar automaticamente a versão do Gradle a partir do gradle-wrapper.properties
+      - name: Detectar versão do Gradle
+        if: env.build_tool == 'gradle'
+        id: detect_gradle_version
+        run: |
+          if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
+            gradle_version=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([^-]+)-bin.zip.*/\1/')
+            echo "gradle_version=$gradle_version" >> $GITHUB_ENV
+            echo "Versão do Gradle detectada: $gradle_version"
+          else
+            echo "Arquivo gradle-wrapper.properties não encontrado."
+            exit 1
+          fi
+
+      # Setup do Gradle utilizando a versão detectada
       - name: Setup Gradle
         if: env.build_tool == 'gradle'
-        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
+        with:
+          gradle-version: ${{ env.gradle_version }}
 
       # Build para projetos Gradle
       - name: Build com Gradle
