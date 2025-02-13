@@ -126,9 +126,15 @@ jobs:
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
 
-          # Procura por arquivos WAR, JAR ou ZIP na pasta target
-          WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
-          JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+          # Procura por arquivos WAR, JAR ou ZIP na pasta target ou para projetos Gradle, procurar na pasta build/libs
+          if [ "${{ env.build_tool }}" = "gradle" ]; then
+            WAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.war" | head -n 1)
+            JAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.jar" | head -n 1)
+          else
+            # Para projetos Maven, procurar na pasta target
+            WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+            JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
+          fi
 
           if [ -f "$WAR_FILE" ]; then
             echo "WAR encontrado: $WAR_FILE"
