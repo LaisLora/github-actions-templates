@@ -27,7 +27,6 @@ jobs:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Detecta se o projeto utiliza Maven ou Gradle
       - name: Detectar Ferramenta de Build
         id: detect_build
         run: |
@@ -44,136 +43,56 @@ jobs:
             exit 1
           fi
 
-      # Caso o projeto seja Gradle, entra na pasta correta antes do build
       - name: Ajustar Diretório do Gradle
         if: env.build_tool == 'gradle'
         run: |
           cd ${{ env.GRADLE_PATH }}
           echo "Executando build dentro de: $(pwd)"
 
-      # Desabilita a limpeza automática do cache do Gradle para evitar execução duplicada
-      - name: Disable Gradle Cleanup
+      - name: Verificar `settings.gradle`
         if: env.build_tool == 'gradle'
-        run: echo "GRADLE_BUILD_ACTION_CACHE_CLEANUP=false" >> $GITHUB_ENV
-
-      # Configura o JDK (independente da ferramenta de build)
-      - name: Configurar JDK
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      # Build para projetos Maven
-      - name: Detectar versão do Java no pom.xml
-        if: env.java_maven == 'true'
-        id: detect_java
         run: |
-          # Tenta extrair o valor de <maven.compiler.source> do pom.xml
-          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          echo "Versão do Java detectada: $JAVA_VERSION"
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Configurar JDK e Maven
-        if: env.java_maven == 'true'
-        uses: actions/setup-java@v3
-        with:
-          java-version: ${{ steps.detect_java.outputs.java_version }}
-          distribution: 'temurin'
-          cache: maven
-          
-      - name: Compilar Projeto Maven
-        if: env.java_maven == 'true'
-        run: mvn clean package
-
-      # Para projetos Gradle, detectar automaticamente a versão do Gradle a partir do gradle-wrapper.properties
-      - name: Detectar versão do Gradle
-        if: env.build_tool == 'gradle'
-        id: detect_gradle_version
-        run: |
-          if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
-            gradle_version=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([^-]+)-.*/\1/')
-            echo "gradle_version=$gradle_version" >> $GITHUB_ENV
-            echo "Versão do Gradle detectada: $gradle_version"
+          SETTINGS_GRADLE="${{ env.GRADLE_PATH }}/settings.gradle"
+          if ! grep -q "include ':salesforce'" "$SETTINGS_GRADLE"; then
+            echo "O módulo 'salesforce' não está no settings.gradle! Adicionando..."
+            echo "include ':salesforce'" >> "$SETTINGS_GRADLE"
+            echo "Módulo 'salesforce' adicionado ao settings.gradle"
           else
-            echo "gradle_version=8.12.1" >> $GITHUB_ENV
-            echo "Arquivo gradle-wrapper.properties não encontrado. Usando Gradle 8.12.1 por padrão."
+            echo "O módulo 'salesforce' já está presente no settings.gradle."
           fi
 
-      # Ajustar a versão do JDK para builds Gradle, conforme a versão do Gradle detectada
-      - name: Ajustar JDK para Gradle
+      - name: Verificar `build.gradle` do `salesforce`
         if: env.build_tool == 'gradle'
         run: |
-          if [ "${{ env.gradle_version }}" = "5.5.1" ]; then
-            echo "Gradle 5.5.1 detectado, usando JDK 11 para compatibilidade."
-            echo "gradle_jdk=11" >> $GITHUB_ENV
+          SALESFORCE_PATH="${{ env.GRADLE_PATH }}/salesforce"
+          if [ ! -f "$SALESFORCE_PATH/build.gradle" ]; then
+            echo "O arquivo build.gradle do módulo salesforce está ausente! Criando..."
+            mkdir -p "$SALESFORCE_PATH"
+            cat <<EOF > "$SALESFORCE_PATH/build.gradle"
+            plugins {
+                id 'java'
+            }
+            EOF
+            echo "build.gradle criado para 'salesforce'"
           else
-            echo "Usando JDK 17 para build Gradle."
-            echo "gradle_jdk=17" >> $GITHUB_ENV
+            echo "O módulo 'salesforce' já contém um build.gradle."
           fi
 
-      # Configurar o JDK para projetos Gradle, usando a variável ajustada
-      - name: Configurar JDK para Gradle
-        if: env.build_tool == 'gradle'
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.gradle_jdk }}
-          distribution: 'temurin'
-
-      # Setup do Gradle utilizando a versão detectada
-      - name: Setup Gradle
-        if: env.build_tool == 'gradle' && env.gradle_setup_done != 'true'
-        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582
-        with:
-          gradle-version: ${{ env.gradle_version }}
-      - run: echo "gradle_setup_done=true" >> $GITHUB_ENV
-
-      # Build para projetos Gradle
-      - name: Build com Gradle
+      - name: Forçar Java 17 no Gradle
         if: env.build_tool == 'gradle'
         run: |
+          echo "org.gradle.java.home=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.14-7/x64" >> gradle.properties
+          echo "Gradle configurado para usar Java 17."
+
+      - name: Build com Gradle (Debug)
+        if: env.build_tool == 'gradle'
+        run: |
+          cd ${{ env.GRADLE_PATH }}
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
-            ./gradlew clean build
+            ./gradlew clean build --info --stacktrace
           else
-            gradle clean build
-          fi
-
-      # Instalar CLI do Veracode e empacotar artefatos para análise
-      - name: Instalar CLI do Veracode e Autopack-Veracode
-        run: |
-          mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-
-          # Procura por arquivos WAR, JAR ou ZIP na pasta target ou para projetos Gradle, procurar na pasta build/libs
-          if [ "${{ env.build_tool }}" = "gradle" ]; then
-            WAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.war" | head -n 1)
-            JAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.jar" | head -n 1)
-          else
-            # Para projetos Maven, procurar na pasta target
-            WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
-            JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
-          fi
-
-          if [ -f "$WAR_FILE" ]; then
-            echo "WAR encontrado: $WAR_FILE"
-            # Copia o WAR para o diretório de artefatos com um nome fixo
-            cp "$WAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
-
-          elif [ -f "$JAR_FILE" ]; then
-            echo "JAR encontrado: $JAR_FILE"
-            cp "$JAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
-            # Compacta o JAR em um zip para padronizar, se necessário
-
-          else
-            echo "Nenhum WAR, JAR ou ZIP encontrado. Rodando Autopack..."
-            curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-            ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
-
-            find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" |
-            while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
-
-            rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
-            zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-            mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+            gradle clean build --info --stacktrace
           fi
 
       - name: Publicar Artefato para Análise
@@ -181,10 +100,8 @@ jobs:
         with:
           name: analysisPack
           path: |
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
             ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
-
           retention-days: 1
 
   sca:
@@ -275,7 +192,7 @@ jobs:
             ARTIFACT="$WAR_FILE"
           else
             # Se não houver WAR, procura por um JAR (excluindo o vosp-api-wrappers)
-            JAR_FILE=$(find target/ -name "*.jar" | head -n 1)
+            JAR_FILE=$(find . -maxdepth 2 -name "*.jar" | head -n 1)
             if [ -f "$JAR_FILE" ]; then
               echo "Java build detectado. Usando arquivo: $JAR_FILE"
               ARTIFACT="$JAR_FILE"
