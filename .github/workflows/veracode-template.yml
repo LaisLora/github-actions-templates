@@ -31,14 +31,25 @@ jobs:
       - name: Detectar Ferramenta de Build
         id: detect_build
         run: |
+          BUILD_GRADLE=$(find . -name "build.gradle" -o -name "build.gradle.kts" | head -n 1)
+
           if [ -f "pom.xml" ]; then
             echo "build_tool=maven" >> $GITHUB_ENV
-          elif [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+          elif [ -n "$BUILD_GRADLE" ]; then
             echo "build_tool=gradle" >> $GITHUB_ENV
+            echo "GRADLE_PATH=$(dirname $BUILD_GRADLE)" >> $GITHUB_ENV
+            echo "Arquivo de build encontrado em: $BUILD_GRADLE"
           else
             echo "Nenhum arquivo de build encontrado (pom.xml ou build.gradle*). Abortando."
             exit 1
           fi
+
+      # Caso o projeto seja Gradle, entra na pasta correta antes do build
+      - name: Ajustar Diretório do Gradle
+        if: env.build_tool == 'gradle'
+        run: |
+          cd ${{ env.GRADLE_PATH }}
+          echo "Executando build dentro de: $(pwd)"
 
       # Desabilita a limpeza automática do cache do Gradle para evitar execução duplicada
       - name: Disable Gradle Cleanup
@@ -202,7 +213,13 @@ jobs:
 
       - name: Extrair Veracode Pipeline Scanner
         run: unzip pipeline-scan-LATEST.zip -d ${{ github.workspace }}/scanner
-
+        
+      - name: Corrigir Permissões do Artefato
+        run: |
+          chmod +r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip || true
+          chmod +r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.jar || true
+          chmod +r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.war || true
+          
       - name: Executar Veracode Pipeline Scan
         id: pipeline_scan
         env:
@@ -212,7 +229,8 @@ jobs:
           # Procura pelo arquivo WAR
           WAR_FILE=$(find . -name "*.war" | head -n 1)
           # Procura pelo arquivo JAR (excluindo o pipeline-scan.jar)
-          JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
+          JAR_FILE=$(find target/ -name "*.jar" | head -n 1)
+          JAR_FILE=$(find target/ -name "*.jar" | head -n 1)
           
           if [ -f "$WAR_FILE" ]; then
             echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
@@ -257,7 +275,7 @@ jobs:
             ARTIFACT="$WAR_FILE"
           else
             # Se não houver WAR, procura por um JAR (excluindo o vosp-api-wrappers)
-            JAR_FILE=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
+            JAR_FILE=$(find target/ -name "*.jar" | head -n 1)
             if [ -f "$JAR_FILE" ]; then
               echo "Java build detectado. Usando arquivo: $JAR_FILE"
               ARTIFACT="$JAR_FILE"
