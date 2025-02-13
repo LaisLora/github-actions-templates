@@ -53,12 +53,12 @@ jobs:
         if: env.build_tool == 'gradle'
         run: |
           SETTINGS_GRADLE="${{ env.GRADLE_PATH }}/settings.gradle"
-          if ! grep -q "include ':salesforce'" "$SETTINGS_GRADLE"; then
+          if [ -f "$SETTINGS_GRADLE" ] && ! grep -q "include ':salesforce'" "$SETTINGS_GRADLE"; then
             echo "O módulo 'salesforce' não está no settings.gradle! Adicionando..."
             echo "include ':salesforce'" >> "$SETTINGS_GRADLE"
             echo "Módulo 'salesforce' adicionado ao settings.gradle"
           else
-            echo "O módulo 'salesforce' já está presente no settings.gradle."
+            echo "O módulo 'salesforce' já está presente ou o arquivo settings.gradle não foi encontrado."
           fi
 
       - name: Verificar `build.gradle` do `salesforce`
@@ -69,10 +69,10 @@ jobs:
             echo "O arquivo build.gradle do módulo salesforce está ausente! Criando..."
             mkdir -p "$SALESFORCE_PATH"
             cat <<EOF > "$SALESFORCE_PATH/build.gradle"
-            plugins {
-                id 'java'
-            }
-            EOF
+plugins {
+    id 'java'
+}
+EOF
             echo "build.gradle criado para 'salesforce'"
           else
             echo "O módulo 'salesforce' já contém um build.gradle."
@@ -81,7 +81,7 @@ jobs:
       - name: Forçar Java 17 no Gradle
         if: env.build_tool == 'gradle'
         run: |
-          echo "org.gradle.java.home=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.14-7/x64" >> gradle.properties
+          echo "org.gradle.java.home=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.14-7/x64" >> ${{ env.GRADLE_PATH }}/gradle.properties
           echo "Gradle configurado para usar Java 17."
 
       - name: Build com Gradle (Debug)
