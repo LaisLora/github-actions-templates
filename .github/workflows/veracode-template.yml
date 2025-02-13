@@ -75,13 +75,33 @@ jobs:
         id: detect_gradle_version
         run: |
           if [ -f "gradle/wrapper/gradle-wrapper.properties" ]; then
-            gradle_version=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([^-]+)-bin.zip.*/\1/')
+            gradle_version=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([^-]+)-.*/\1/')
             echo "gradle_version=$gradle_version" >> $GITHUB_ENV
             echo "Versão do Gradle detectada: $gradle_version"
           else
             echo "Arquivo gradle-wrapper.properties não encontrado."
             exit 1
           fi
+
+      # Ajustar a versão do JDK para builds Gradle, conforme a versão do Gradle detectada
+      - name: Ajustar JDK para Gradle
+        if: env.build_tool == 'gradle'
+        run: |
+          if [ "${{ env.gradle_version }}" = "5.5.1" ]; then
+            echo "Gradle 5.5.1 detectado, usando JDK 11 para compatibilidade."
+            echo "gradle_jdk=11" >> $GITHUB_ENV
+          else
+            echo "Usando JDK 17 para build Gradle."
+            echo "gradle_jdk=17" >> $GITHUB_ENV
+          fi
+
+      # Configurar o JDK para projetos Gradle, usando a variável ajustada
+      - name: Configurar JDK para Gradle
+        if: env.build_tool == 'gradle'
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.gradle_jdk }}
+          distribution: 'temurin'
 
       # Setup do Gradle utilizando a versão detectada
       - name: Setup Gradle
