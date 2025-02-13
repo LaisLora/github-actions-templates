@@ -27,7 +27,7 @@ jobs:
       - name: Checkout Código
         uses: actions/checkout@v4
 
-      # Detectar ferramenta de build: Maven ou Gradle
+      # Detecta se o projeto utiliza Maven ou Gradle
       - name: Detectar Ferramenta de Build
         id: detect_build
         run: |
@@ -40,43 +40,27 @@ jobs:
             exit 1
           fi
 
-      # Detectar versão do Java no Gradle a partir do compiler.xml
-      - name: Detectar Configurações do Projeto (Gradle)
-        if: env.build_tool == 'gradle'
-        id: detect_java_gradle
-        run: |
-          JAVA_VERSION=""
-
-          # Buscar no compiler.xml
-          COMPILER_XML=$(find . -type f -name "compiler.xml" | head -n1)
-          if [ -n "$COMPILER_XML" ]; then
-            echo "Verificando $COMPILER_XML para encontrar a versão do Java..."
-            JAVA_VERSION=$(awk -F 'target="' '{print $2}' "$COMPILER_XML" | awk -F '"' '{print $1}' | head -n1)
-          fi
-
-          # Caso não encontre, usa um valor padrão
-          if [ -z "$JAVA_VERSION" ]; then
-            echo "Nenhuma versão do Java detectada em $COMPILER_XML. Usando Java 21 como padrão."
-            JAVA_VERSION=21
-          fi
-
-          echo "Versão do Java detectada: $JAVA_VERSION"
-          echo "java_version=$JAVA_VERSION" >> $GITHUB_ENV
-
-      # Configurar JDK para Gradle
-      - name: Configurar JDK e Gradle
-        if: env.build_tool == 'gradle'
-        uses: actions/setup-java@v3
+      # Configura o JDK (independente da ferramenta de build)
+      - name: Configurar JDK
+        uses: actions/setup-java@v4
         with:
-          java-version: ${{ env.java_version }}
-          distribution: temurin
-          cache: gradle
+          java-version: '17'
+          distribution: 'temurin'
 
-      # Compilar Projeto Gradle
-      - name: Compilar Projeto Gradle
+      # Build para projetos Maven
+      - name: Build com Maven
+        if: env.build_tool == 'maven'
+        run: mvn clean package
+
+      # Build para projetos Gradle
+      - name: Setup Gradle
+        if: env.build_tool == 'gradle'
+        uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+
+      # Build para projetos Gradle
+      - name: Build com Gradle
         if: env.build_tool == 'gradle'
         run: |
-          echo "Compilando projeto Gradle com Java ${{ env.java_version }}..."
           if [ -f "./gradlew" ]; then
             chmod +x gradlew
             ./gradlew clean build
@@ -89,12 +73,15 @@ jobs:
         run: |
           ARTIFACT_DIR="${{ github.workspace }}/artifacts/${{ inputs.build-id }}"
           mkdir -p "$ARTIFACT_DIR"
-      
+
           if [ "${{ env.build_tool }}" = "gradle" ]; then
             WAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.war" | head -n 1)
             JAR_FILE=$(find build/libs/ -maxdepth 1 -name "*.jar" | head -n 1)
+          elif [ "${{ env.build_tool }}" = "maven" ]; then
+            WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
+            JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
           fi
-      
+
           if [ -f "$WAR_FILE" ]; then
             echo "WAR encontrado: $WAR_FILE"
             cp "$WAR_FILE" "$ARTIFACT_DIR/application.war"
