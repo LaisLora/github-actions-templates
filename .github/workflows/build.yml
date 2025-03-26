@@ -1,7 +1,7 @@
 name: Build
 
 on:
-  workflow_call: # Permite que outros workflows chamem este
+  workflow_call:
     inputs:
       project-path:
         description: 'Caminho do projeto'
@@ -9,64 +9,147 @@ on:
         type: string
 
 jobs:
-  Linguagem-project:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      is_php: ${{ steps.detect.outputs.is_php }}
+      is_python: ${{ steps.detect.outputs.is_python }}
+      is_node: ${{ steps.detect.outputs.is_node }}
+      is_java: ${{ steps.detect.outputs.is_java }}
+      is_dotnet: ${{ steps.detect.outputs.is_dotnet }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mudar para o diretório do projeto
+        run: cd ${{ inputs.project-path }}
+      - name: Detectar linguagens
+        id: detect
+        run: |
+          if [ -f composer.json ]; then echo "is_php=true" >> $GITHUB_OUTPUT; else echo "is_php=false" >> $GITHUB_OUTPUT; fi
+          if [ -f requirements.txt ]; then echo "is_python=true" >> $GITHUB_OUTPUT; else echo "is_python=false" >> $GITHUB_OUTPUT; fi
+          if [ -f package.json ]; then echo "is_node=true" >> $GITHUB_OUTPUT; else echo "is_node=false" >> $GITHUB_OUTPUT; fi
+          if [ -f pom.xml ]; then echo "is_java=true" >> $GITHUB_OUTPUT; else echo "is_java=false" >> $GITHUB_OUTPUT; fi
+          if ls *.csproj 1> /dev/null 2>&1; then echo "is_dotnet=true" >> $GITHUB_OUTPUT; else echo "is_dotnet=false" >> $GITHUB_OUTPUT; fi
+
+  build_php:
+    needs: detect
+    if: ${{ needs.detect.outputs.is_php == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Mudar para o diretório do projeto
+        run: cd ${{ inputs.project-path }}
+      - name: Validar composer.json e composer.lock
+        run: composer validate --strict
+      - name: Cache dos pacotes do Composer
+        id: composer-cache
+        uses: actions/cache@v3
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php-
+      - name: Instalar dependências
+        run: composer install --prefer-dist --no-progress
+      # Para rodar testes, adicione um script "test" no composer.json e descomente:
+      # - name: Executar testes
+      #   run: composer run-script test
 
-      - name: Detectar Linguagem do Projeto
-        id: detect_language
+  build_python:
+    needs: detect
+    if: ${{ needs.detect.outputs.is_python == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mudar para o diretório do projeto
+        run: cd ${{ inputs.project-path }}
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Atualizar pip e instalar dependências
         run: |
-          echo "Detectando linguagem do projeto..."
-          cd ${{ inputs.project-path }}
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Lint com flake8
+        run: |
+          pip install flake8
+          flake8 .
+      - name: Executar testes com pytest
+        run: |
+          pip install pytest
+          pytest
+
+  build_node:
+    needs: detect
+    if: ${{ needs.detect.outputs.is_node == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mudar para o diretório do projeto
+        run: cd ${{ inputs.project-path }}
+      - name: Configurar Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      - name: Instalar dependências
+        run: npm install
+      - name: Rodar lint (se configurado)
+        run: npm run lint
+      - name: Executar testes
+        run: npm test
+
+  build_java:
+    needs: detect
+    if: ${{ needs.detect.outputs.is_java == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mudar para o diretório do projeto
+        run: cd ${{ inputs.project-path }}
+      - name: Detectar projeto Java-Maven
+        id: check_maven
+        run: |
           if [ -f "pom.xml" ]; then
-            echo "Linguagem detectada: Java (Maven)"
-            echo "language=java" >> $GITHUB_ENV
-            echo "build_tool=maven" >> $GITHUB_ENV
-          elif [ -f "build.gradle" ]; then
-            echo "Linguagem detectada: Java (Gradle)"
-            echo "language=java" >> $GITHUB_ENV
-            echo "build_tool=gradle" >> $GITHUB_ENV
-          elif [ -f "package.json" ]; then
-            echo "Linguagem detectada: Node.js"
-            echo "language=node" >> $GITHUB_ENV
-          elif [ -f "requirements.txt" ]; then
-            echo "Linguagem detectada: Python"
-            echo "language=python" >> $GITHUB_ENV
-          elif ls *.csproj &>/dev/null; then
-            echo "Linguagem detectada: .NET"
-            echo "language=dotnet" >> $GITHUB_ENV
+            echo "java_maven=true" >> $GITHUB_OUTPUT
           else
-            echo "Linguagem não detectada ou não suportada. Abortando."
-            exit 1
+            echo "java_maven=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Instalar Pré-requisitos
+      - name: Detectar versão do Java no pom.xml
+        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+        id: detect_java
         run: |
-          echo "Instalando pré-requisitos para a linguagem detectada..."
-          if [ "$language" == "java" ]; then
-            echo "Linguagem: Java"
-            if [ "$build_tool" == "maven" ]; then
-              echo "Ferramenta de build: Maven"
-              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk maven
-            elif [ "$build_tool" == "gradle" ]; then
-              echo "Ferramenta de build: Gradle"
-              sudo apt-get update && sudo apt-get install -y openjdk-11-jdk gradle
-            fi
-          elif [ "$language" == "node" ]; then
-            echo "Linguagem: Node.js"
-            sudo apt-get update && sudo apt-get install -y nodejs npm
-          elif [ "$language" == "python" ]; then
-            echo "Linguagem: Python"
-            sudo apt-get update && sudo apt-get install -y python3 python3-pip
-          elif [ "$language" == "dotnet" ]; then
-            echo "Linguagem: .NET"
-            sudo apt-get update && sudo apt-get install -y dotnet-sdk-6.0
-          else
-            echo "Linguagem desconhecida. Abortando."
-            exit 1
+          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+          if [[ "$JAVA_VERSION" == "11" ]]; then
+            JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
           fi
+          echo "Versão do Java detectada: $JAVA_VERSION"
+          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
+      - name: Configurar JDK e Maven
+        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ steps.detect_java.outputs.java_version }}
+          distribution: temurin
+          cache: maven
+      - name: Compilar projeto Maven
+        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+        run: mvn clean package
 
-      - name: Conclusão
-        run: echo "Configuração concluída com sucesso para a linguagem $language."
+  build_dotnet:
+    needs: detect
+    if: ${{ needs.detect.outputs.is_dotnet == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Mudar para o diretório do projeto
+        run: cd ${{ inputs.project-path }}
+      - name: Configurar .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '7.0.x'
+      - name: Restaurar dependências
+        run: dotnet restore
+      - name: Compilar solução
+        run: dotnet build --configuration Release --no-restore
+      - name: Executar testes
+        run: dotnet test --no-build --verbosity normal
