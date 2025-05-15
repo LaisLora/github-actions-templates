@@ -19,4 +19,4 @@ jobs:
           SRCCLR_WORKSPACE_SLUG: ${{ secrets.SRCCLR_WORKSPACE_SLUG }}
         with:
           quick: true
-          store-results-json: false # <-- adicionar esta linha
+          results-json-artifact-name: "veracode-sca-results"
