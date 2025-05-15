@@ -1,0 +1,43 @@
+name: Veracode Template v3
+
+on:
+  workflow_call:
+    inputs:
+      build-id:
+        description: 'ID da build'
+        required: true
+        type: string
+
+      project_veracode:
+        description: 'Project'
+        required: true
+        type: string
+
+      environment:
+        description: 'Environment'
+        required: true
+        type: string
+
+      veracode_policy_name:
+        description: 'Policy do Veracode'
+        required: true
+        type: string
+
+
+env:
+  PROJECT: ${{ inputs.project_veracode }}
+  ENVIRONMENT: ${{ inputs.environment }}
+  SRCCLR_WORKSPACE_SLUG: ${{ inputs.SRCCLR_WORKSPACE_SLUG }}
+
+jobs:
+  veracode-sca:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+
+      - name: Executar Veracode SCA Scan
+        uses: veracode/veracode-sca@v2.1.10
+        env:
+          SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }}
+          SRCCLR_WORKSPACE_SLUG: ${{ secrets.SRCCLR_WORKSPACE_SLUG }}
