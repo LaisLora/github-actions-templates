@@ -1,12 +1,10 @@
-name: Veracode Template v3
+name: Veracode SCA Scan
 
 on:
   workflow_call:
-
-env:
-  PROJECT: ${{ inputs.project_veracode }}
-  ENVIRONMENT: ${{ inputs.environment }}
-  SRCCLR_WORKSPACE_SLUG: ${{ inputs.SRCCLR_WORKSPACE_SLUG }}
+    secrets:
+      SRCCLR_WORKSPACE_SLUG:
+        required: true
 
 jobs:
   veracode-sca:
