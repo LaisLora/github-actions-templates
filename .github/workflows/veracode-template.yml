@@ -1,241 +1,252 @@
-name: Veracode Template v3
+# .github/workflows/veracode-template.yml
 
 on:
   workflow_call:
+    # SEGREGAÇÃO DE SEGREDOS: cada secret precisa ser referenciado literalmente
+    secrets:
+      SCA_ORGANIZACIONAL:      # token do agente SCA
+        required: true
+      SRCCLR_WORKSPACE_SLUG:   # slug principal do workspace
+        required: true
+      SRCCLR_WORKSPACE_SLUG01: # slug secundário do workspace
+        required: true
+      APIID_VERACODE:          # credencial API Veracode (SAST/Pipeline Scan)
+        required: true
+      APIKEY_VERACODE:         # credencial API Veracode (SAST/Pipeline Scan)
+        required: true
+
     inputs:
       build-id:
-        description: 'ID da build'
+        description: 'ID da build (p.ex. ${{ github.run_id }}.${{ github.run_number }})'
         required: true
         type: string
-
-      project_veracode:
-        description: 'Project'
-        required: true
-        type: string
-
       environment:
-        description: 'Environment'
+        description: 'Ambiente de execução (p.ex. dev, qa, prod)'
         required: true
         type: string
-
+      project_veracode:
+        description: 'Chave/slug lógico do projeto para Veracode'
+        required: true
+        type: string
       veracode_policy_name:
-        description: 'Policy do Veracode'
+        description: 'Nome da policy do Veracode'
         required: true
         type: string
-
-env:
-  PROJECT: ${{ inputs.project_veracode }}
-  ENVIRONMENT: ${{ inputs.environment }}
 
 jobs:
-  AutoPack:
-    name: AutoPack
-    runs-on: ubuntu-24.04
+  # 1) JOB DE MAPEAMENTO: extrai o slug correto conforme project_veracode
+  prepare-mapping:
+    name: 📍 Prepare Workspace Mapping
+    runs-on: ubuntu-latest
+    env:
+      SLUG_PRIMARY:   ${{ secrets.SRCCLR_WORKSPACE_SLUG }}
+      SLUG_SECONDARY: ${{ secrets.SRCCLR_WORKSPACE_SLUG01 }}
+      # Para adicionar mais workspaces, declare:
+      # SLUG_TERTIARY:   ${{ secrets.SRCCLR_WORKSPACE_SLUG02 }}
+    outputs:
+      workspace_slug: ${{ steps.map.outputs.slug }}
     steps:
-      - name: Checkout Código
+      - id: map
+        name: 🔄 Mapear projeto → workspace slug
+        shell: bash
+        run: |
+          # 1) Defina aqui o mapeamento projeto → nome da variável de ambiente
+          declare -A WORKSPACE_MAP=(
+            ["verademo3"]="SLUG_SECONDARY"
+            ["app-frontend"]="SLUG_PRIMARY"
+            # ... inclua todos os seus repositórios
+          )
+
+          PROJ="${{ inputs.project_veracode }}"
+          VAR_NAME="${WORKSPACE_MAP[$PROJ]}"
+
+          if [[ -z "$VAR_NAME" ]]; then
+            echo "::error ::Projeto '$PROJ' não mapeado. Atualize WORKSPACE_MAP!" >&2
+            exit 1
+          fi
+
+          # 2) Expansão indireta para obter o slug real
+          SELECTED_SLUG="${!VAR_NAME}"
+          echo "slug=$SELECTED_SLUG" >> $GITHUB_OUTPUT
+          echo "✔️ Projeto '$PROJ' → workspace_slug='$SELECTED_SLUG'"
+
+  # 2) JOB DE AUTOPACK: empacota o artefato para SAST/Pipeline Scan
+  autopack:
+    name: 🚀 AutoPack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Código
         uses: actions/checkout@v4
 
       - name: Detectar Projeto Java-Maven
         id: check_maven
+        shell: bash
         run: |
-          if [ -f "pom.xml" ]; then
+          if [[ -f "pom.xml" ]]; then
             echo "java_maven=true" >> $GITHUB_OUTPUT
           else
             echo "java_maven=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Detectar versão do Java no pom.xml
-        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+        if: steps.check_maven.outputs.java_maven == 'true'
         id: detect_java
+        shell: bash
         run: |
-          # Tenta extrair o valor de <maven.compiler.source> do pom.xml
           JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
           if [[ "$JAVA_VERSION" == "11" ]]; then
             JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
           fi
-          echo "Versão do Java detectada: $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
       - name: Configurar JDK e Maven
-        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+        if: steps.check_maven.outputs.java_maven == 'true'
         uses: actions/setup-java@v3
         with:
           java-version: ${{ steps.detect_java.outputs.java_version }}
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
       - name: Compilar Projeto Maven
-        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
-        run: mvn clean package
+        if: steps.check_maven.outputs.java_maven == 'true'
+        shell: bash
+        run: mvn clean package -DskipTests
 
-      - name: Instalar CLI do Veracode e Autopack-Veracode
+      - name: Instalar CLI do Veracode e Autopack
+        shell: bash
         run: |
           mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
-          # Procura por arquivos WAR, JAR ou ZIP na pasta target
-          WAR_FILE=$(find target/ -maxdepth 1 -name "*.war" | head -n 1)
-          JAR_FILE=$(find target/ -maxdepth 1 -name "*.jar" | head -n 1)
-
-          if [ -f "$WAR_FILE" ]; then
-            echo "WAR encontrado: $WAR_FILE"
-            cp "$WAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
-          elif [ -f "$JAR_FILE" ]; then
-            echo "JAR encontrado: $JAR_FILE"
-            cp "$JAR_FILE" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
+          WAR=$(find target/ -maxdepth 1 -name "*.war" | head -n1)
+          JAR=$(find target/ -maxdepth 1 -name "*.jar" | head -n1)
+          if [[ -f "$WAR" ]]; then
+            cp "$WAR" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
+          elif [[ -f "$JAR" ]]; then
+            cp "$JAR" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
           else
-            echo "Nenhum WAR, JAR ou ZIP encontrado. Rodando Autopack..."
             curl -fsS https://tools.veracode.com/veracode-cli/install | sh
             ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
-            find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" |
-            while read filename; do unzip -o -d "$(dirname "$filename")" "$filename"; done
+            find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" \
+              | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
             rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
             zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
             mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
           fi
 
-      - name: Publicar Artefato para Análise
+      - name: Publicar Artefato
         uses: actions/upload-artifact@v4
         with:
           name: analysisPack
-          path: |
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
-            ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
-          retention-days: 1
+          path: ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/**
 
-  SCA:
-    name: SCA
-    runs-on: ubuntu-24.04
+  # 3) JOB DE SCA: roda o scan de dependencies paralelo
+  sca:
+    name: 🔍 Veracode SCA
+    runs-on: ubuntu-latest
+    needs: [prepare-mapping]
+    env:
+      SRCCLR_API_TOKEN:      ${{ secrets.SCA_ORGANIZACIONAL }}
+      SRCCLR_WORKSPACE_SLUG: ${{ needs.prepare-mapping.outputs.workspace_slug }}
     steps:
       - uses: actions/checkout@v4
-      - name: Executar Veracode SCA
-        #continue-on-error: true
-        env:
-          SRCCLR_API_TOKEN: ${{ secrets.SCA }}
-        run: |
-          curl -sSL https://download.sourceclear.com/ci.sh | bash -s – scan --update-advisor --allow-dirty
+      - name: Executar SCA (SourceClear)
+        shell: bash
 
-  Scan:
-    name: Scan
-    runs-on: ubuntu-24.04
-    needs: AutoPack
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
+
+  # 4) JOB DE PIPELINE SCAN: usa o artefato e o mesmo workspace_slug
+  scan:
+    name: ⏱️ Veracode Pipeline Scan
+    runs-on: ubuntu-latest
+    needs: [autopack, prepare-mapping]
+    env:
+      VID:                    ${{ secrets.APIID_VERACODE }}
+      VKEY:                   ${{ secrets.APIKEY_VERACODE }}
+      SRCCLR_WORKSPACE_SLUG:  ${{ needs.prepare-mapping.outputs.workspace_slug }}
     steps:
-      # 1) Baixa o artifact com nome 'analysisPack'
-      - name: Baixar Artefato para Análise
+      - name: Baixar artefato
         uses: actions/download-artifact@v4
-        with:
-          name: analysisPack
-
-      # 2) (Opcional) Listar arquivos baixados para confirmar o que veio
-
-
-      # 3) Detectar qual arquivo usar (WAR/JAR ou analysisPack.zip)
-      - name: Detectar arquivo de análise
+        with: { name: analysisPack }
+      - name: Detectar arquivo para scan
         id: detect_artifact
+        shell: bash
         run: |
-          # Procura pelo arquivo WAR
-          WAR_FILE=$(find . -name "*.war" | head -n 1)
-          # Procura pelo arquivo JAR (excluindo o pipeline-scan.jar)
-          JAR_FILE=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n 1)
-
-          if [ -f "$WAR_FILE" ]; then
-            echo "WAR encontrado: $WAR_FILE"
-            echo "artifact_file=$WAR_FILE" >> $GITHUB_OUTPUT
-          elif [ -f "$JAR_FILE" ]; then
-            echo "JAR encontrado: $JAR_FILE"
-            echo "artifact_file=$JAR_FILE" >> $GITHUB_OUTPUT
+          WAR=$(find . -name "*.war" | head -n1)
+          JAR=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n1)
+          if [[ -f "$WAR" ]]; then
+            echo "artifact_file=$WAR" >> $GITHUB_OUTPUT
+          elif [[ -f "$JAR" ]]; then
+            echo "artifact_file=$JAR" >> $GITHUB_OUTPUT
           else
-            if [ -f "analysisPack.zip" ]; then
-              echo "Nenhum WAR/JAR encontrado. Usando analysisPack.zip."
-              echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
-            else
-              echo "Erro: Nenhum WAR/JAR ou analysisPack.zip"
-            fi
+            echo "::error ::Nenhum WAR/JAR encontrado" && exit 1
           fi
-
-      # 4) Executa o Pipeline Scan usando o arquivo detectado
-      - name: Executar Veracode Pipeline Scan
+      - name: Substituir policy se necessário
+        id: policy-remap
+        shell: bash
+        run: |
+          echo "policy=${{ inputs.veracode_policy_name }}" >> $GITHUB_OUTPUT
+          declare -A PMAP=(
+            ["verademo3"]="AFRIKA_AST"
+            ["node.js.verademo"]="Veracode Recommended Very High + SCA v1"
+          )
+          ALT=${PMAP[${{ inputs.project_veracode }}]}
+          if [[ -n "$ALT" ]]; then
+            echo "policy=$ALT" >> $GITHUB_OUTPUT
+          fi
+      - name: Executar Pipeline Scan
         uses: veracode/Veracode-pipeline-scan-action@v1.0.18
         with:
           vid: ${{ secrets.APIID_VERACODE }}
           vkey: ${{ secrets.APIKEY_VERACODE }}
-          file: ${{ steps.detect_artifact.outputs.artifact_file }}
-          veracode_policy_name: ${{ inputs.veracode_policy_name }}
-          fail_build: true
-  SAST:
-    runs-on: ubuntu-24.04
-    needs: AutoPack
-    steps:
-      - name: Baixar Artefato para Análise SAST
-        uses: actions/download-artifact@v4
-        with:
-          name: analysisPack
+          file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          veracode_policy_name: ${{ steps.policy-remap.outputs.policy }}
+          fail_build: ${{ inputs.environment == 'prod' }}
 
-      - name: Baixar Veracode SAST Wrapper
+  # 5) JOB DE SAST: wrapper Java, usa o mesmo artefato
+  sast:
+    name: ⚙️ Veracode SAST
+    runs-on: ubuntu-latest
+    needs: autopack
+    env:
+      VID:         ${{ secrets.APIID_VERACODE }}
+      VKEY:        ${{ secrets.APIKEY_VERACODE }}
+      ENVIRONMENT: ${{ inputs.environment }}
+    steps:
+      - name: Baixar artefato
+        uses: actions/download-artifact@v4
+        with: { name: analysisPack }
+      - name: Download SAST Wrapper
+        shell: bash
         run: |
           curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
-
-      - name: Project Name Substitution
-        id: project-name-sub
+      - name: Mapear nome do app se preciso
+        id: project-remap
+        shell: bash
         run: |
-          # Caso projeto não esteja no map, utiliza o nome padrão
-          echo "project_veracode_sub=${{ inputs.project_veracode }}" >> "$GITHUB_OUTPUT"
-          # Criar o mapeamento de nomes dos projetos
-          declare -A PROJECT_MAP
-          PROJECT_MAP["nomeprojetozuado"]="novonomeprojeto"
-          PROJECT_MAP["nomeprojetozuado02"]="novonomeprojeto02"
-          # Setar o nome do projeto, se houver mapeamento
-          if [[ ${PROJECT_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
-            echo "Definindo novo nome para ${{ inputs.project_veracode }}: ${PROJECT_MAP[${{ inputs.project_veracode }}]}"
-            echo "project_veracode_sub=${PROJECT_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
+          echo "app=${{ inputs.project_veracode }}" >> $GITHUB_OUTPUT
+          declare -A AMAP=(
+            ["nomeprojetozuado"]="novonomeprojeto"
+            ["nomeprojetozuado02"]="novonomeprojeto02"
+          )
+          ALT=${AMAP[${{ inputs.project_veracode }}]}
+          if [[ -n "$ALT" ]]; then
+            echo "app=$ALT" >> $GITHUB_OUTPUT
           fi
-
-      - name: Read Project Name Substitution
-        run: echo "${{ steps.project-name-sub.outputs.project_veracode_sub }}"
-
-      - name: Executar Veracode SAST
-        env:
-          VID: ${{ secrets.APIID_VERACODE }}
-          VKEY: ${{ secrets.APIKEY_VERACODE }}
-          ENVIRONMENT: ${{ inputs.environment }}
+      - name: Executar SAST
+        shell: bash
         run: |
-          # Verifica se existe um WAR
-          WAR_FILE=$(find . -maxdepth 2 -name "*.war" | head -n 1)
-          if [ -f "$WAR_FILE" ]; then
-            echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
-            ARTIFACT="$WAR_FILE"
-          else
-            # Procura por um JAR (excluindo o vosp-api-wrappers)
-            JAR_FILE=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
-            if [ -f "$JAR_FILE" ]; then
-              echo "Java build detectado. Usando arquivo: $JAR_FILE"
-              ARTIFACT="$JAR_FILE"
-            else
-              echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
-              ARTIFACT="analysisPack.zip"
-            fi
+          ART=$(find . -maxdepth 2 -name "*.war" | head -n1)
+          if [[ -z "$ART" ]]; then
+            ART=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n1)
+            [ -z "$ART" ] && ART="analysisPack.zip"
           fi
 
-          if [ "$ENVIRONMENT" == "prod" ]; then
-            echo "Executando SAST em ambiente de produção..."
-            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-              -vid $VID -vkey $VKEY \
-              -action uploadandscan \
-              -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
-              -version "${{ inputs.build-id }}" \
-              -filepath "$ARTIFACT" \
-              -createprofile true \
-              -deleteincompletescan 2 \
-              -createsandbox false
-          else
-            echo "Executando SAST em ambiente de sandbox..."
-            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-              -vid $VID -vkey $VKEY \
-              -action uploadandscan \
-              -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
-              -version "${{ inputs.build-id }}" \
-              -filepath "$ARTIFACT" \
-              -createprofile true \
-              -deleteincompletescan 2 \
-              -createsandbox true \
-              -sandboxname "$ENVIRONMENT"
-          fi
+          java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+            -vid $VID -vkey $VKEY \
+            -action uploadandscan \
+            -appname "${{ steps.project-remap.outputs.app }}" \
+            -version "${{ inputs.build-id }}" \
+            -filepath "$ART" \
+            -createprofile true \
+            -deleteincompletescan 2 \
+            $( [[ "$ENVIRONMENT" == "prod" ]] && echo "-createsandbox false" || echo "-createsandbox true -sandboxname $ENVIRONMENT -debug" )
