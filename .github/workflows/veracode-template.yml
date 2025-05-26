@@ -17,7 +17,7 @@ on:
 
     inputs:
       build-id:
-        description: 'ID da build (ex: ${{ github.run_id }}.${{ github.run_number }})'
+        description: 'ID da build'
         required: true
         type: string
       environment:
