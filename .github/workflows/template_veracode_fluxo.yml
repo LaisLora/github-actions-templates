@@ -71,8 +71,8 @@ jobs:
     uses: LaisLora/github-actions-templates/.github/workflows/veracode-template.yml@main
     secrets: inherit
     with:
-      build-id:           ${{ inputs.build-id }}
-      environment:        ${{ inputs.environment }}
-      project_veracode:   ${{ inputs.project }}
+      build-id: ${{ inputs.build-id }}
+      environment: ${{ inputs.environment }}
+      project_veracode: ${{ inputs.project }}
       veracode_policy_name: ${{ inputs.veracode_policy_name }}
       
