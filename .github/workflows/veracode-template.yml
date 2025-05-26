@@ -4,7 +4,7 @@ on:
   workflow_call:
     secrets:
       # Tokens e slugs necessários (nomes literais, não podem ser dinâmicos)
-      SCA_ORGANIZACIONAL:      # token do agente SCA
+      SRCCLR_API_TOKEN:      # token do agente SCA
         required: true
       SRCCLR_WORKSPACE_SLUG:   # slug principal do workspace
         required: true
