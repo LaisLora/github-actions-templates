@@ -147,26 +147,42 @@ jobs:
     needs: AutoPack
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
-        with: { name: analysisPack }
+    # 1. baixa o artefato gerado pelo AutoPack
+    - uses: actions/download-artifact@v4
+      with: { name: analysisPack }
 
-      - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+    # 2. baixa o wrapper Java do Veracode
+    - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
 
-      - name: Executar SAST
-        env: { VID: ${{ secrets.APIID_VERACODE }}, VKEY: ${{ secrets.APIKEY_VERACODE }} }
-        shell: bash
-        run: |
-          java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-            -vid $VID -vkey $VKEY \
-            -action uploadandscan \
-            -appname "${{ inputs.project_veracode }}" \
-            -version "${{ inputs.build-id }}" \
-            -filepath analysisPack.zip \
-            -createprofile true \
-            -deleteincompletescan 2 \
-            -createsandbox $([[ "${{ inputs.environment }}" == "prod" ]] && echo false || echo true) \
-            $([[ "${{ inputs.environment }}" != "prod" ]] && echo "-sandboxname ${{ inputs.environment }}"))
+    # 3. executa o SAST usando apenas analysisPack.zip
+    - name: Executar Veracode SAST
+      env:
+        VID:  ${{ secrets.APIID_VERACODE }}
+        VKEY: ${{ secrets.APIKEY_VERACODE }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      shell: bash
+      run: |
+        ARTIFACT="analysisPack.zip"
+        [[ ! -f "$ARTIFACT" ]] && { echo "::error::analysisPack.zip não encontrado"; exit 1; }
 
+        if [ "$ENVIRONMENT" = "prod" ]; then
+          CREATESANDBOX=false
+          SANDBOX_OPT=""
+        else
+          CREATESANDBOX=true
+          SANDBOX_OPT="-sandboxname $ENVIRONMENT"
+        fi
+
+        java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+          -vid $VID -vkey $VKEY \
+          -action uploadandscan \
+          -appname "${{ inputs.project_veracode }}" \
+          -version "${{ github.run_id }}" \
+          -filepath "$ARTIFACT" \
+          -createprofile true \
+          -deleteincompletescan 2 \
+          -createsandbox $CREATESANDBOX \
+          $SANDBOX_OPT
 # ------------------------------------------------------
 # JOB 5 — Converter JSON → SARIF
 # ------------------------------------------------------
