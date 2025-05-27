@@ -28,7 +28,7 @@ on:
         default: 'AFRIKA_AST'
 
       python_version:
-        description: Versão do Python (ex.: 3.12 ou 2.7)
+        description: Versão do Python
         required: false
         type: string
 
