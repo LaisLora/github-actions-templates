@@ -1,0 +1,197 @@
+# .github/workflows/veracode-template.yml
+
+on:
+  workflow_call:
+    inputs:
+      build-id:
+        description: 'ID da build'
+        required: true
+        type: string
+      environment:
+        description: 'Ambiente (dev, qa, prod)'
+        required: true
+        type: string
+      project_veracode:
+        description: 'Chave lógica do projeto para Veracode'
+        required: true
+        type: string
+      veracode_policy_name:
+        description: 'Nome da policy do Veracode'
+        required: true
+        type: string
+
+jobs:
+
+  # ─── AutoPack ────────────────────────────────────────────────────────────────
+  autopack:
+    name: 🚀 AutoPack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Detectar Projeto Java-Maven
+        id: check_maven
+        shell: bash
+        run: |
+          if [[ -f "pom.xml" ]]; then
+            echo "java_maven=true" >> $GITHUB_OUTPUT
+          else
+            echo "java_maven=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Detectar versão do Java
+        if: steps.check_maven.outputs.java_maven == 'true'
+        id: detect_java
+        shell: bash
+        run: |
+          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+          echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Configurar JDK e Maven
+        if: steps.check_maven.outputs.java_maven == 'true'
+        uses: actions/setup-java@v3
+        with:
+          java-version: ${{ steps.detect_java.outputs.java_version }}
+          distribution: temurin
+          cache: maven
+
+      - name: Compilar Projeto Maven
+        if: steps.check_maven.outputs.java_maven == 'true'
+        shell: bash
+        run: mvn clean package -DskipTests
+
+      - name: Empacotar Artefatos para Scan
+        shell: bash
+        run: |
+          mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
+          WAR=$(find target/ -maxdepth 1 -name "*.war" | head -n1)
+          JAR=$(find target/ -maxdepth 1 -name "*.jar" | head -n1)
+          if [[ -f "$WAR" ]]; then
+            cp "$WAR" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.war
+          elif [[ -f "$JAR" ]]; then
+            cp "$JAR" ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/application.jar
+          else
+            curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+            ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
+            find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" \
+              | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+            rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
+            zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
+            mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+          fi
+
+      - name: Publicar Artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysisPack
+          path: ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/**
+
+
+  # ─── Veracode SCA (com Workspace Map no próprio job) ──────────────────────────
+  sca:
+    name: SCA
+    runs-on: ubuntu-24.04
+
+  # 3.1 – Expõe TODOS os secrets de slug como variáveis de ambiente
+  #       Assim podemos referenciá-los por expansão indireta (${!var})
+    env:
+      # Token do agente organizacional
+      SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+  
+      # Slugs dos workspaces (adicione quantos precisar)
+      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
+      WORKSPACE_WEBAPP: ${{ secrets.WORKSPACE_WEBAPP }}
+      WORKSPACE_AKS:    ${{ secrets.WORKSPACE_AKS }}
+      WORKSPACE_KAFKA:  ${{ secrets.WORKSPACE_KAFKA }}
+  
+    steps:
+      - uses: actions/checkout@v4
+  
+      # 3.2 – Resolve dinamicamente qual secret contém o slug
+      - name: Resolve workspace slug
+        id: slug
+        shell: bash
+        run: |
+          declare -A WORKSPACE_SECRET_MAP
+          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
+          WORKSPACE_SECRET_MAP["clienterei-frontend"]="WORKSPACE_WEBAPP"
+          WORKSPACE_SECRET_MAP["clientereides"]="WORKSPACE_AKS"
+          # ↑ mantenha a tabela empresarial aqui
+  
+          secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
+  
+          if [[ -z "$secret_name" ]]; then
+            echo "::error::Projeto '${{ inputs.project_veracode }}' sem mapeamento de workspace."
+            exit 1
+          fi
+  
+          # Expansão indireta: obtém o valor do secret ($WORKSPACE_JAVA → slug real)
+          slug_value="${!secret_name}"
+          echo "slug=$slug_value" >>"$GITHUB_OUTPUT"
+          echo "Usando workspace '$slug_value' (secret: $secret_name)"
+  
+      # 3.3 – Executa o agente SCA apontando para o slug resolvido
+      - name: Run Veracode SCA scan
+        env:
+          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh \
+            | bash -s -- scan --update-advisor --allow-dirty
+
+
+  # ─── Veracode Pipeline Scan (mantém policy remap intacto) ────────────────────
+  scan:
+    name: ⏱️ Veracode Pipeline Scan
+    runs-on: ubuntu-latest
+    needs: autopack
+    env:
+      VID: ${{ secrets.VERACODE_API_ID }}
+      VKEY: ${{ secrets.AVERACODE_API_KEY }}
+      # usa o mesmo workspace slug gerado no SCA
+    outputs:
+      app_name: ${{ steps.map-project.outputs.app }}
+    steps:
+      - name: Baixar artefato
+        uses: actions/download-artifact@v4
+        with:
+          name: analysisPack
+
+      - name: Detectar arquivo para scan
+        id: detect_artifact
+        shell: bash
+        run: |
+          WAR=$(find . -name "*.war" | head -n1)
+          JAR=$(find . -name "*.jar" -not -name "pipeline-scan.jar" | head -n1)
+          if [[ -f "$WAR" ]]; then
+            echo "artifact_file=$WAR" >> $GITHUB_OUTPUT
+          elif [[ -f "$JAR" ]]; then
+            echo "artifact_file=$JAR" >> $GITHUB_OUTPUT
+          else
+            echo "::error ::Nenhum WAR/JAR encontrado" && exit 1
+          fi
+
+      - name: Policy Name Substitution
+        id: policy-remap
+        shell: bash
+        run: |
+          echo "policy=${{ inputs.veracode_policy_name }}" >> $GITHUB_OUTPUT
+          declare -A PMAP=(
+            ["verademo3"]="AFRIKA_AST"
+            ["node.js.verademo"]="Veracode Recommended Very High + SCA v1"
+          )
+          ALT=${PMAP[${{ inputs.project_veracode }}]}
+          if [[ -n "$ALT" ]]; then
+            echo "policy=$ALT" >> $GITHUB_OUTPUT
+          fi
+
+      # 4) Executa o Pipeline Scan usando o arquivo detectado
+      - name: Executar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+        with:
+          vid: ${{ secrets.APIID_VERACODE }}
+          vkey: ${{ secrets.APIKEY_VERACODE }}
+          file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          veracode_policy_name: ${{ steps.policy-name-sub.outputs.policy_veracode_sub }}
+          #fail_build: true
+          fail_build: ${{ inputs.environment == 'prod' }}
