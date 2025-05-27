@@ -185,15 +185,13 @@ jobs:
             echo "policy=$ALT" >> $GITHUB_OUTPUT
           fi
 
-      - name: Executar Pipeline Scan
-        id: pipeline-scan
+      # 4) Executa o Pipeline Scan usando o arquivo detectado
+      - name: Executar Veracode Pipeline Scan
         uses: veracode/Veracode-pipeline-scan-action@v1.0.18
         with:
-          vid: ${{ secrets.VERACODE_API_ID}}
-          vkey: ${{ secrets.VERACODE_API_KEY }}
+          vid: ${{ secrets.APIID_VERACODE }}
+          vkey: ${{ secrets.APIKEY_VERACODE }}
           file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
-          veracode_policy_name: ${{ steps.policy-remap.outputs.policy }}
+          veracode_policy_name: ${{ steps.policy-name-sub.outputs.policy_veracode_sub }}
+          #fail_build: true
           fail_build: ${{ inputs.environment == 'prod' }}
-
-
-
