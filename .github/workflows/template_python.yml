@@ -235,25 +235,35 @@ jobs:
           sarif_file: veracode-results.sarif
 
 
-sbom:
+  process-results:   
+    needs: Scan
+    runs-on: ubuntu-24.04
+    steps:
+
+  sbom:                   
     name: setup
     runs-on: ubuntu-latest
-    container: 
+    container:
       image: veracode/api-signing:latest
     env:
       VERACODE_API_KEY_ID: ${{ secrets.APIID_VERACODE }}
-      VERACODE_API_KEY_SECRET : ${{ secrets.APIKEY_VERACODE }}
+      VERACODE_API_KEY_SECRET: ${{ secrets.APIKEY_VERACODE }}
 
     steps:
       - name: generate-sbom
-        run: | 
+        run: |
           cd /tmp
           export LEGACYID=${{ secrets.VERACODE_APP_ID }}
-          echo LEGACYID: ${LEGACYID}
-          appguid=$(http --auth-type=veracode_hmac GET "https://api.veracode.com/appsec/v1/applications?legacy_id=${LEGACYID}" | jq -r '._embedded.applications[0].guid')
-          echo GUID: ${appguid}
-          http --auth-type=veracode_hmac GET "https://api.veracode.com/srcclr/sbom/v1/targets/${appguid}/cyclonedx?type=application" > sbom.json
+          echo "LEGACYID: ${LEGACYID}"
+          appguid=$(http --auth-type=veracode_hmac GET \
+            "https://api.veracode.com/appsec/v1/applications?legacy_id=${LEGACYID}" |
+            jq -r '._embedded.applications[0].guid')
+          echo "GUID: ${appguid}"
+          http --auth-type=veracode_hmac GET \
+            "https://api.veracode.com/srcclr/sbom/v1/targets/${appguid}/cyclonedx?type=application" \
+            > sbom.json
           ls -l
+
       - name: save sbom file
         uses: actions/upload-artifact@v4
         with:
