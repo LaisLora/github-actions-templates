@@ -106,34 +106,59 @@ jobs:
 # JOB 3 — Pipeline Scan
 # ------------------------------------------------------
   Scan:
-    needs: AutoPack
+    name: ⏱️ Veracode Pipeline Scan
     runs-on: ubuntu-24.04
+    needs: AutoPack
+    
     steps:
-      - uses: actions/download-artifact@v4
-        with: { name: analysisPack }
-
-      - name: Detect artefact
-        id: detect
-        shell: bash
-        run: echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
-
-      - name: Policy map
-        id: policy
-        shell: bash
-        run: |
-          echo "policy_veracode_sub=${{ inputs.veracode_policy_name }}" >> $GITHUB_OUTPUT
-          [[ "${{ inputs.project_veracode }}" == "python.py" ]] && \
-            echo "policy_veracode_sub=AFRIKA_AST" >> $GITHUB_OUTPUT
-
-      - uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+      # 1) Baixa o artifact com nome 'analysisPack'
+      - name: Baixar Artefato para Análise
+        uses: actions/download-artifact@v4
         with:
-          vid:  ${{ secrets.APIID_VERACODE }}
+          name: analysisPack
+  
+      # 2) (Opcional) Listar arquivos baixados para confirmar o que veio
+      
+  
+      # 3) Detectar qual arquivo usar (WAR/JAR ou analysisPack.zip)
+      - name: Detectar arquivo de análise
+        id: detect_artifact
+        run: |
+            if [ -f "analysisPack.zip" ]; then
+              echo "Usando analysisPack.zip."
+              echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
+            else
+              echo "Erro: analysisPack.zip não encontrado"
+            fi
+
+      - name: Policy Name Substitution
+        id: policy-name-sub
+        run: |
+        
+            # Setar policy default
+            echo "policy_veracode_sub=${{ inputs.veracode_policy_name }}" >> "$GITHUB_OUTPUT"
+            
+            # Forçar policy 
+            declare -A POLICY_MAP
+            POLICY_MAP["python.py"]="AFRIKA_AST"
+            ###colocar os outros projetos
+            
+            if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
+                            echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
+                            echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
+            fi
+          
+      - name: Executar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+        with:
+          vid: ${{ secrets.APIID_VERACODE }}
           vkey: ${{ secrets.APIKEY_VERACODE }}
-          file: ${{ steps.detect.outputs.artifact_file }} --issue_details true
-          veracode_policy_name: ${{ steps.policy.outputs.policy_veracode_sub }}
+          file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          veracode_policy_name: ${{ steps.policy-name-sub.outputs.policy_veracode_sub }}
+          #fail_build: true
           fail_build: ${{ inputs.environment == 'prod' }}
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: ScanResults
           path: results.json
