@@ -2,19 +2,6 @@
 
 on:
   workflow_call:
-    secrets:
-      # Tokens e slugs necessários (nomes literais, não podem ser dinâmicos)
-      SRCCLR_API_TOKEN:      # token do agente SCA
-        required: true
-      SRCCLR_WORKSPACE_SLUG:   # slug principal do workspace
-        required: true
-      SRCCLR_WORKSPACE_SLUG01: # slug secundário do workspace
-        required: true
-      APIID_VERACODE:          # credencial API Veracode (SAST/Pipeline)
-        required: true
-      APIKEY_VERACODE:         # credencial API Veracode (SAST/Pipeline)
-        required: true
-
     inputs:
       build-id:
         description: 'ID da build'
@@ -103,47 +90,54 @@ jobs:
 
   # ─── Veracode SCA (com Workspace Map no próprio job) ──────────────────────────
   sca:
-    name: 🔍 Veracode SCA
-    runs-on: ubuntu-latest
-    needs: autopack
-    env:
-      # Expõe os slugs que poderão ser escolhidos
-      SLUG_PRIMARY:   ${{ secrets.SRCCLR_WORKSPACE_SLUG }}
-      SLUG_SECONDARY: ${{ secrets.SRCCLR_WORKSPACE_SLUG01 }}
-      # Token do agente
-      SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }}
-    steps:
-      - name: Checkout do Código
-        uses: actions/checkout@v4
+    name: SCA
+    runs-on: ubuntu-24.04
 
-      - name: Mapear projeto → workspace slug
-        id: map-workspace
+  # 3.1 – Expõe TODOS os secrets de slug como variáveis de ambiente
+  #       Assim podemos referenciá-los por expansão indireta (${!var})
+    env:
+      # Token do agente organizacional
+      SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+  
+      # Slugs dos workspaces (adicione quantos precisar)
+      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
+      WORKSPACE_WEBAPP: ${{ secrets.WORKSPACE_WEBAPP }}
+      WORKSPACE_AKS:    ${{ secrets.WORKSPACE_AKS }}
+      WORKSPACE_KAFKA:  ${{ secrets.WORKSPACE_KAFKA }}
+  
+    steps:
+      - uses: actions/checkout@v4
+  
+      # 3.2 – Resolve dinamicamente qual secret contém o slug
+      - name: Resolve workspace slug
+        id: slug
         shell: bash
         run: |
-          declare -A WORKSPACE_MAP=(
-            ["verademo3"]="SLUG_PRIMARY"
-            ["app-frontend"]="SLUG_PRIMARY"
-            # ... adicione seus mapeamentos aqui ...
-          )
-
-          PROJ="${{ inputs.project_veracode }}"
-          VAR_NAME="${WORKSPACE_MAP[$PROJ]}"
-
-          if [[ -z "$VAR_NAME" ]]; then
-            echo "::error ::Projeto '$PROJ' não mapeado. Atualize o WORKSPACE_MAP!" >&2
+          declare -A WORKSPACE_SECRET_MAP
+          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
+          WORKSPACE_SECRET_MAP["clienterei-frontend"]="WORKSPACE_WEBAPP"
+          WORKSPACE_SECRET_MAP["clientereides"]="WORKSPACE_AKS"
+          # ↑ mantenha a tabela empresarial aqui
+  
+          secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
+  
+          if [[ -z "$secret_name" ]]; then
+            echo "::error::Projeto '${{ inputs.project_veracode }}' sem mapeamento de workspace."
             exit 1
           fi
-
-          # Expansão indireta para obter o slug real
-          SELECTED_SLUG="${!VAR_NAME}"
-          echo "✔️ Projeto '$PROJ' → workspace_slug='$SELECTED_SLUG'"
-          echo "SRCCLR_WORKSPACE_SLUG=$SELECTED_SLUG" >> $GITHUB_ENV
-
-      - name: Executar SCA (SourceClear)
-        shell: bash
-        continue-on-error: true
+  
+          # Expansão indireta: obtém o valor do secret ($WORKSPACE_JAVA → slug real)
+          slug_value="${!secret_name}"
+          echo "slug=$slug_value" >>"$GITHUB_OUTPUT"
+          echo "Usando workspace '$slug_value' (secret: $secret_name)"
+  
+      # 3.3 – Executa o agente SCA apontando para o slug resolvido
+      - name: Run Veracode SCA scan
+        env:
+          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
-          curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty
+          curl -sSL https://download.sourceclear.com/ci.sh \
+            | bash -s -- scan --update-advisor --allow-dirty
 
 
   # ─── Veracode Pipeline Scan (mantém policy remap intacto) ────────────────────
