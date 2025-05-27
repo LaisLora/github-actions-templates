@@ -1,0 +1,236 @@
+name: Veracode ­Python Template
+
+####################################################################
+# 0. PARÂMETROS DO WORKFLOW REUTILIZÁVEL
+####################################################################
+on:
+  workflow_call:
+    inputs:
+      build-id:
+        description: ID único da build (ex.: ${{ github.run_id }})
+        required: true
+        type: string
+
+      environment:
+        description: Ambiente (dev, qa, prod)
+        required: true
+        type: string
+
+      project_veracode:
+        description: Nome lógico do projeto no Veracode
+        required: true
+        type: string
+
+      veracode_policy_name:
+        description: Policy a aplicar (override opcional)
+        required: false
+        type: string
+        default: 'Embracon-Corporativa'
+
+      python_version:
+        description: Versão do Python (ex.: 3.12 ou 2.7)
+        required: false
+        type: string
+
+    secrets: inherit         # herda todos os segredos do caller
+####################################################################
+jobs:
+####################################################################
+
+# -----------------------------------------------------------------
+# JOB 1 — AutoPack  (CLI + unzip → re-zip)
+# -----------------------------------------------------------------
+  AutoPack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Seleciona versão de Python (sem build, mas garante ambiente)
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version || '3.12' }}
+
+      # (Opcional) atualiza pip só para evitar warnings
+      - name: Prepare Python
+        shell: bash
+        run: |
+          python -m pip install --upgrade --quiet pip
+
+      # ====== BLOCO ORIGINAL PRESERVADO ======
+      - name: Empacotar Artefatos para Scan
+        shell: bash
+        run: |
+          mkdir -p ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+          ./veracode package --source . \
+                             --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} \
+                             --trust
+
+          find ${{ github.workspace }}/artifacts/${{ inputs.build-id }} -name "*.zip" \
+            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+
+          rm -rf ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/*.zip
+          zip analysisPack.zip -r ${{ github.workspace }}/artifacts/${{ inputs.build-id }}
+          mv analysisPack.zip ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+      # ========================================
+
+      - name: Publicar Artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysisPack
+          path: ${{ github.workspace }}/artifacts/${{ inputs.build-id }}/analysisPack.zip
+
+# -----------------------------------------------------------------
+# JOB 2 — SCA (slug dinâmico)
+# -----------------------------------------------------------------
+  SCA:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    env:
+      SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+
+      # Slugs de workspace como secrets
+      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
+      WORKSPACE_WEBAPP: ${{ secrets.WORKSPACE_WEBAPP }}
+      WORKSPACE_AKS:    ${{ secrets.WORKSPACE_AKS }}
+      WORKSPACE_KAFKA:  ${{ secrets.WORKSPACE_KAFKA }}
+
+    steps:
+      - name: Resolve workspace slug
+        id: slug
+        shell: bash
+        run: |
+          declare -A WORKSPACE_SECRET_MAP=(
+            ["python.py"]="WORKSPACE_JAVA"
+            ["clienterei-frontend"]="WORKSPACE_WEBAPP"
+            ["clientereides"]="WORKSPACE_AKS"
+          )
+
+          secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
+          [[ -z "$secret_name" ]] && { echo "::error::Projeto sem mapeamento de workspace"; exit 1; }
+          echo "slug=${!secret_name}" >> $GITHUB_OUTPUT
+
+      - name: Run Veracode SCA
+        env:
+          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
+        run: curl -sSL https://download.sourceclear.com/ci.sh \
+             | bash -s -- scan --update-advisor --allow-dirty
+
+# -----------------------------------------------------------------
+# JOB 3 — Pipeline Scan (policy mapping)
+# -----------------------------------------------------------------
+  Scan:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: analysisPack }
+
+      - name: Detectar arquivo de análise
+        id: detect_artifact
+        shell: bash
+        run: |
+          if [[ -f analysisPack.zip ]]; then
+            echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
+          else
+            echo "::error::analysisPack.zip não encontrado"
+            exit 1
+          fi
+
+      - name: Policy Name Substitution
+        id: policy-name-sub
+        shell: bash
+        run: |
+          echo "policy_veracode_sub=${{ inputs.veracode_policy_name }}" >> $GITHUB_OUTPUT
+
+          # mapa de override
+          declare -A POLICY_MAP=( ["python.py"]="AFRIKA_AST" )
+
+          if [[ -n "${POLICY_MAP[${{ inputs.project_veracode }}]}" ]]; then
+            echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Executar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+        with:
+          vid:   ${{ secrets.APIID_VERACODE }}
+          vkey:  ${{ secrets.APIKEY_VERACODE }}
+          file:  ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          veracode_policy_name: ${{ steps.policy-name-sub.outputs.policy_veracode_sub }}
+          fail_build: ${{ inputs.environment == 'prod' }}
+
+      - name: Upload raw JSON results
+        uses: actions/upload-artifact@v3
+        with:
+          name: ScanResults
+          path: results.json
+
+# -----------------------------------------------------------------
+# JOB 4 — Static Scan (wrapper upload)
+# -----------------------------------------------------------------
+  SAST:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: analysisPack }
+
+      - name: Baixar Veracode SAST Wrapper
+        run: |
+          curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
+      - name: Executar Veracode SAST
+        env:
+          VID:  ${{ secrets.APIID_VERACODE }}
+          VKEY: ${{ secrets.APIKEY_VERACODE }}
+        shell: bash
+        run: |
+          ARTIFACT="analysisPack.zip"
+
+          if [ "$ENVIRONMENT" == "prod" ]; then
+            echo "Executando SAST em ambiente de produção..."
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+              -vid $VID -vkey $VKEY \
+              -action uploadandscan \
+              -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
+              -version "${{ inputs.build-id }}" \
+              -filepath "$ARTIFACT" \
+              -createprofile true \
+              -deleteincompletescan 2 \
+              -createsandbox false
+          else
+            echo "Executando SAST em ambiente de sandbox..."
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+              -vid $VID -vkey $VKEY \
+              -action uploadandscan \
+              -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
+              -version "${{ inputs.build-id }}" \
+              -filepath "$ARTIFACT" \
+              -createprofile true \
+              -deleteincompletescan 2 \
+              -createsandbox true \
+              -sandboxname "$ENVIRONMENT" \
+              -debug
+          fi
+
+# -----------------------------------------------------------------
+# JOB 5 — Converter JSON ➜ SARIF e publicar
+# -----------------------------------------------------------------
+  process-results:
+    needs: Scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v3
+        with: { name: ScanResults }
+
+      - name: Convert to SARIF
+        uses: veracode/veracode-pipeline-scan-results-to-sarif@master
+        with:
+          pipeline-results-json: results.json
+          output-results-sarif: veracode-results.sarif
+          finding-rule-level: "4:3:0"
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: veracode-results.sarif
