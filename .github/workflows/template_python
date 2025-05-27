@@ -89,7 +89,7 @@ jobs:
       SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
 
       # Slugs de workspace como secrets
-      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
+      WORKSPACE_PY:   ${{ secrets.WORKSPACE_PY }}
       WORKSPACE_WEBAPP: ${{ secrets.WORKSPACE_WEBAPP }}
       WORKSPACE_AKS:    ${{ secrets.WORKSPACE_AKS }}
       WORKSPACE_KAFKA:  ${{ secrets.WORKSPACE_KAFKA }}
@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           declare -A WORKSPACE_SECRET_MAP=(
-            ["python.py"]="WORKSPACE_JAVA"
+            ["python.py"]="WORKSPACE_PY"
             ["clienterei-frontend"]="WORKSPACE_WEBAPP"
             ["clientereides"]="WORKSPACE_AKS"
           )
