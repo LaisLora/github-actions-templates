@@ -7,7 +7,7 @@ on:
   workflow_call:
     inputs:
       build-id:
-        description: ID único da build (ex.: ${{ github.run_id }})
+        description: ID único da build
         required: true
         type: string
 
