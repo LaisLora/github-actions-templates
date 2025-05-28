@@ -93,7 +93,7 @@ jobs:
         run: |
           declare -A MAP=( ["python.py"]="WORKSPACE_PY"
                            ["aplica-o_vul_py"]="WORKSPACE_PY"
-                           ["clientereides"]="WORKSPACE_AKS" )
+                           ["projeto1"]="WORKSPACE_AKS" )
           secret="${MAP[${{ inputs.project_veracode }}]}"
           [[ -z "$secret" ]] && { echo "::error::Projeto sem workspace"; exit 1; }
           echo "slug=${!secret}" >> $GITHUB_OUTPUT
