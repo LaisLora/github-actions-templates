@@ -92,7 +92,7 @@ jobs:
         shell: bash
         run: |
           declare -A MAP=( ["python.py"]="WORKSPACE_PY"
-                           ["clienterei-frontend"]="WORKSPACE_WEBAPP"
+                           ["aplica-o_vul_py"]="WORKSPACE_PY"
                            ["clientereides"]="WORKSPACE_AKS" )
           secret="${MAP[${{ inputs.project_veracode }}]}"
           [[ -z "$secret" ]] && { echo "::error::Projeto sem workspace"; exit 1; }
@@ -142,6 +142,7 @@ jobs:
             # Forçar policy 
             declare -A POLICY_MAP
             POLICY_MAP["python.py"]="AFRIKA_AST"
+            POLICY_MAP["aplica-o_vul_py"]="AFRIKA_AST"
             ###colocar os outros projetos
             
             if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
