@@ -62,28 +62,27 @@ jobs:
             --no-interaction --prefer-dist --no-progress
 
       # Empacota com Veracode CLI (mesma lógica)
-      - name: Veracode Auto-Pack
+      - name: Empacotar Artefatos para Scan
         shell: bash
         run: |
-          OUT="$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
-          mkdir -p "$OUT"
-
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
           curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-          ./veracode package \
-            --source "${{ steps.comp.outputs.composer_dir }}" \
-            --output "$OUT" \
-            --trust
+          ./veracode package --source . \
+                             --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
+                             --trust
 
-          # padroniza: unzip → rezip → analysisPack.zip
-          find "$OUT" -name '*.zip' | while read z; do unzip -o -d "$(dirname "$z")" "$z"; done
-          rm -f "$OUT"/*.zip
-          (cd "$OUT" && zip -rq analysisPack.zip .)
-          echo "Empacotado: $OUT/analysisPack.zip"
+          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
+            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+
+          rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
+          zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
 
       - uses: actions/upload-artifact@v4
         with:
           name: analysisPack
           path: artifacts/${{ inputs.build-id }}/analysisPack.zip
+          
 # JOB 2 — SCA
 # ------------------------------------------------------
   SCA:
@@ -106,7 +105,9 @@ jobs:
                            ["aplica-o_vul_py"]="WORKSPACE_PY"
                            ["Sitebase"]="WORKSPACE_PHP" 
                            
-                           #Coloque acima os projetos e seus respectivos workspaces )
+                           )
+                           
+                           #Coloque acima os projetos e seus respectivos workspaces 
                            
           secret="${MAP[${{ inputs.project_veracode }}]}"
           [[ -z "$secret" ]] && { echo "::error::Projeto sem workspace"; exit 1; }
