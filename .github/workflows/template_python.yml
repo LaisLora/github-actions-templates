@@ -43,12 +43,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1) Ambiente Python
+      # 1) Ambiente Python -------------------------------------------------
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python_version || '3.12' }}
 
-      # 2) Instala dependências dinamicamente 
+      # 2) Detectar + instalar dependências (Pipfile / Poetry / requirements)
       - name: Instalar dependências (pipenv | poetry | requirements)
         id: deps
         shell: bash
@@ -57,42 +57,60 @@ jobs:
           python -m pip install -q --upgrade pip
 
           # ---------------- DETECÇÃO ----------------
-          PIPFILE=$(git ls-files -- **/Pipfile | head -n1 || true)
-          POETRY=$(git ls-files -- **/pyproject.toml | xargs grep -l "\[tool.poetry\]" | head -n1 || true)
-          mapfile -t REQS < <(git ls-files -- **/requirements*.txt | sort)
+          mapfile -t PIPFILES  < <(git ls-files -- **/Pipfile)
+          mapfile -t POETRIES  < <(git ls-files -- **/pyproject.toml | xargs -r grep -l "\[tool.poetry\]")
+          mapfile -t REQS      < <(git ls-files -- **/requirements*.txt | sort)
 
           echo "📦  Arquivos detectados:"
-          echo "  • Pipfile.............: ${PIPFILE:-<nenhum>}"
-          echo "  • pyproject (Poetry)..: ${POETRY:-<nenhum>}"
-          printf "  • requirements........: %s\n" "${REQS[@]:-<nenhum>}"
+          printf "  • Pipfile.............: %s\n"  "${PIPFILES[@]:-<nenhum>}"
+          printf "  • pyproject (Poetry)..: %s\n"  "${POETRIES[@]:-<nenhum>}"
+          printf "  • requirements........: %s\n"  "${REQS[@]:-<nenhum>}"
 
           # ---------------- INSTALAÇÃO ---------------
-          if [[ -n "$PIPFILE" ]]; then
-            echo "→ Usando pipenv"
+          ######## 1) Pipenv ##############################################
+          if [[ ${#PIPFILES[@]} -gt 0 ]]; then
+            echo "→ Instalando dependências de ${#PIPFILES[@]} Pipfile(s)"
             python -m pip install -q pipenv
-            cd "$(dirname "$PIPFILE")"
-            if [[ -f Pipfile.lock ]]; then
-              pipenv sync --dev
-            else
-              pipenv install --dev --skip-lock
-            fi
-
-          elif [[ -n "$POETRY" ]]; then
-            echo "→ Usando poetry"
-            python -m pip install -q poetry
-            cd "$(dirname "$POETRY")"
-            poetry install --no-interaction --no-root
-
-          elif [[ ${#REQS[@]} -gt 0 ]]; then
-            echo "→ Usando requirements*.txt"
-            for f in "${REQS[@]}"; do
-              echo "   - $f"
-              pip install -r "$f"
+            for pf in "${PIPFILES[@]}"; do
+              echo "   - $pf"
+              (
+                cd "$(dirname "$pf")"
+                if [[ -f Pipfile.lock ]]; then
+                  pipenv sync --dev
+                else
+                  pipenv install --dev --skip-lock
+                fi
+              )
             done
-          else
-            echo "⚠️  Nenhum gerenciador de dependências encontrado; seguindo sem instalar libs"
           fi
 
+          ######## 2) Poetry ###############################################
+          if [[ ${#POETRIES[@]} -gt 0 ]]; then
+            echo "→ Instalando dependências de ${#POETRIES[@]} pyproject(s)"
+            python -m pip install -q poetry
+            for pp in "${POETRIES[@]}"; do
+              echo "   - $pp"
+              (
+                cd "$(dirname "$pp")"
+                poetry install --no-interaction --no-root
+              )
+            done
+          fi
+
+          ######## 3) requirements*.txt ####################################
+          if [[ ${#REQS[@]} -gt 0 ]]; then
+            echo "→ Instalando dependências de ${#REQS[@]} requirements*.txt"
+            for rq in "${REQS[@]}"; do
+              echo "   - $rq"
+              pip install -r "$rq"
+            done
+          fi
+
+          ######## 4) Nenhum gerenciador? ##################################
+          if [[ ${#PIPFILES[@]} -eq 0 && ${#POETRIES[@]} -eq 0 && ${#REQS[@]} -eq 0 ]]; then
+            echo "⚠️  Nenhum arquivo de dependências encontrado; seguindo sem instalar libs"
+          fi
+          
       # 3) Empacotar com o Veracode CLI  (SEM mudanças)
       - name: Empacotar Artefatos para Scan
         shell: bash
