@@ -1,4 +1,3 @@
-
 name: Veracode-PHP Template
 
 ########################################################
@@ -26,72 +25,65 @@ on:
         description: Policy a aplicar (override opcional)
         required: false
         type: string
-        default: 'AFRIKA_AST'
+        default: AFRIKA_AST
 
 ########################################################
 jobs:
+########################################################
+
 # ------------------------------------------------------
 # JOB 1 — AutoPack (PHP + Composer)
 # ------------------------------------------------------
   AutoPack:
     runs-on: ubuntu-24.04
     steps:
-      # 1) checkout do código
       - uses: actions/checkout@v4
 
-      # 2) instala PHP + Composer — requisito
+      # ② Instala o PHP + Composer
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: ${{ inputs.php_version || '8.2' }}   # ajuste se precisar 8.1, 7.4…
+          php-version: ${{ inputs.php_version || '8.2' }}
+          tools: composer:v2        # sempre Composer 2.x
 
-      - name: Locate composer.json
+      # ③ Descobre o composer.json (primeiro que aparecer) e instala deps
+      - name: Composer install
         id: comp
         shell: bash
         run: |
-          # Procura apenas no primeiro nível onde houver composer.json
-          COMPOSER_PATH=$(git ls-files -- */composer.json | head -n 1)
-          if [[ -z "$COMPOSER_PATH" ]]; then
-            echo "::error::Nenhum composer.json encontrado no repositório"
-            exit 1
+          FILE=$(git ls-files -- */composer.json | head -n1)
+          if [[ -z "$FILE" ]]; then
+            echo "::error::Nenhum composer.json encontrado"; exit 1
           fi
-          DIR=$(dirname "$COMPOSER_PATH")
-          echo "composer_dir=$DIR"     >> $GITHUB_OUTPUT
-          echo "Composer encontrado em: $DIR"
+          DIR=$(dirname "$FILE")
+          echo "composer_dir=$DIR" >>"$GITHUB_OUTPUT"
+          echo "🎼  composer.json localizado em: $DIR"
 
-# 2️⃣ Instala dependências do PHP/Laravel
-      - name: Composer install
+          composer --working-dir="$DIR" install \
+            --no-interaction --prefer-dist --no-progress
+
+      # Empacota com Veracode CLI (mesma lógica)
+      - name: Veracode Auto-Pack
         shell: bash
-        working-directory: ${{ steps.comp.outputs.composer_dir }}
         run: |
-          composer install --no-interaction --prefer-dist --no-progress
-      
-            # 4) empacota usando o Veracode CLI — requisito ④
-            - name: Veracode Auto-Pack
-              shell: bash
-              run: |
-                mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
-                curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-      
-                # empacota todo o source + vendor
-                ./veracode package \
-                  --source . \
-                  --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
-                  --trust
-      
-                # unzip/rezip para padronizar nome do artefato
-                find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
-                  | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
-      
-                rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
-                zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
-                mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
-      
-            # 5) publica o ZIP para os próximos jobs
-            - uses: actions/upload-artifact@v4
-              with:
-                name: analysisPack
-                path: artifacts/${{ inputs.build-id }}/analysisPack.zip
+          OUT="$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          mkdir -p "$OUT"
 
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+          ./veracode package \
+            --source "${{ steps.comp.outputs.composer_dir }}" \
+            --output "$OUT" \
+            --trust
+
+          # padroniza: unzip → rezip → analysisPack.zip
+          find "$OUT" -name '*.zip' | while read z; do unzip -o -d "$(dirname "$z")" "$z"; done
+          rm -f "$OUT"/*.zip
+          (cd "$OUT" && zip -rq analysisPack.zip .)
+          echo "Empacotado: $OUT/analysisPack.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysisPack
+          path: artifacts/${{ inputs.build-id }}/analysisPack.zip
 # JOB 2 — SCA
 # ------------------------------------------------------
   SCA:
