@@ -1,0 +1,223 @@
+
+name: Veracode-PHP Template
+
+########################################################
+# 0. Parâmetros do workflow reutilizável
+########################################################
+on:
+  workflow_call:
+    inputs:
+      build-id:
+        description: ID único da build
+        required: true
+        type: string
+
+      environment:
+        description: Ambiente (dev, qa, prod)
+        required: true
+        type: string
+
+      project_veracode:
+        description: Nome lógico do projeto no Veracode
+        required: true
+        type: string
+
+      veracode_policy_name:
+        description: Policy a aplicar (override opcional)
+        required: false
+        type: string
+        default: 'AFRIKA_AST'
+
+########################################################
+jobs:
+# ------------------------------------------------------
+# JOB 1 — AutoPack (PHP + Composer)
+# ------------------------------------------------------
+  AutoPack:
+    runs-on: ubuntu-24.04
+    steps:
+      # 1) checkout do código
+      - uses: actions/checkout@v4
+
+      # 2) instala PHP + Composer — requisito
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php_version || '8.2' }}   # ajuste se precisar 8.1, 7.4…
+
+      # 3) instala dependências do projeto — requisito 
+      - name: Composer install
+        shell: bash
+        run: |
+          if [ -f "composer.json" ]; then
+            composer install --no-interaction --prefer-dist --no-progress
+          else
+            echo "::error::composer.json não encontrado; verifique o repositório."
+            exit 1
+          fi
+
+      # 4) empacota usando o Veracode CLI — requisito ④
+      - name: Veracode Auto-Pack
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+
+          # empacota todo o source + vendor
+          ./veracode package \
+            --source . \
+            --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
+            --trust
+
+          # unzip/rezip para padronizar nome do artefato
+          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
+            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+
+          rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
+          zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
+
+      # 5) publica o ZIP para os próximos jobs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysisPack
+          path: artifacts/${{ inputs.build-id }}/analysisPack.zip
+
+# JOB 2 — SCA
+# ------------------------------------------------------
+  SCA:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    env:
+      SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+      WORKSPACE_PY:     ${{ secrets.WORKSPACE_PY }}
+      WORKSPACE_PHP: ${{ secrets.WORKSPACE_PHP }}
+      WORKSPACE_AKS:    ${{ secrets.WORKSPACE_AKS }}
+      WORKSPACE_KAFKA:  ${{ secrets.WORKSPACE_KAFKA }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve workspace slug
+        id: slug
+        shell: bash
+        run: |
+          declare -A MAP=( ["python.py"]="WORKSPACE_PY"
+                           ["aplica-o_vul_py"]="WORKSPACE_PY"
+                           ["app_vul_php"]="WORKSPACE_PHP" 
+                           
+                           #Coloque acima os projetos e seus respectivos workspaces )
+                           
+          secret="${MAP[${{ inputs.project_veracode }}]}"
+          [[ -z "$secret" ]] && { echo "::error::Projeto sem workspace"; exit 1; }
+          echo "slug=${!secret}" >> $GITHUB_OUTPUT
+
+      - name: Run Veracode SCA
+        env:
+          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh | sh -s scan --update-advisor --uri-as-name --recursive
+
+# ------------------------------------------------------
+# JOB 3 — Pipeline Scan
+# ------------------------------------------------------
+  Scan:
+    name: ⏱️ Veracode Pipeline Scan
+    runs-on: ubuntu-24.04
+    needs: AutoPack
+    
+    steps:
+      # 1) Baixa o artifact com nome 'analysisPack'
+      - name: Baixar Artefato para Análise
+        uses: actions/download-artifact@v4
+        with:
+          name: analysisPack
+  
+      # 2) (Opcional) Listar arquivos baixados para confirmar o que veio
+      
+  
+      - name: Detectar arquivo de análise
+        id: detect_artifact
+        run: |
+            if [ -f "analysisPack.zip" ]; then
+              echo "Usando analysisPack.zip."
+              echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
+            else
+              echo "Erro: analysisPack.zip não encontrado"
+            fi
+
+      - name: Policy Name Substitution
+        id: policy-name-sub
+        run: |
+        
+            # Setar policy default
+            echo "policy_veracode_sub=${{ inputs.veracode_policy_name }}" >> "$GITHUB_OUTPUT"
+            
+            # Forçar policy 
+            declare -A POLICY_MAP
+            POLICY_MAP["python.py"]="AFRIKA_AST"
+            POLICY_MAP["aplica-o_vul_py"]="AFRIKA_AST"
+            POLICY_MAP["app_vul_php"]="AFRIKA_AST"
+            ###colocar os outros projetos
+            
+            if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
+                            echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
+                            echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
+            fi
+          
+      - name: Executar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+        with:
+          vid: ${{ secrets.APIID_VERACODE }}
+          vkey: ${{ secrets.APIKEY_VERACODE }}
+          file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          veracode_policy_name: ${{ steps.policy-name-sub.outputs.policy_veracode_sub }}
+          #fail_build: true
+          fail_build: ${{ inputs.environment == 'prod' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScanResults
+          path: results.json
+
+# ------------------------------------------------------
+# JOB 4 — SAST
+# ------------------------------------------------------
+  SAST:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    steps:
+    # 1. baixa o artefato gerado pelo AutoPack
+    - uses: actions/download-artifact@v4
+      with: { name: analysisPack }
+
+    # 2. baixa o wrapper Java do Veracode
+    - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
+    # 3. executa o SAST usando apenas analysisPack.zip
+    - name: Executar Veracode SAST
+      env:
+        VID:  ${{ secrets.APIID_VERACODE }}
+        VKEY: ${{ secrets.APIKEY_VERACODE }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      shell: bash
+      run: |
+        ARTIFACT="analysisPack.zip"
+        [[ ! -f "$ARTIFACT" ]] && { echo "::error::analysisPack.zip não encontrado"; exit 1; }
+
+        if [ "$ENVIRONMENT" = "prod" ]; then
+          CREATESANDBOX=false
+          SANDBOX_OPT=""
+        else
+          CREATESANDBOX=true
+          SANDBOX_OPT="-sandboxname $ENVIRONMENT"
+        fi
+
+        java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+          -vid $VID -vkey $VKEY \
+          -action uploadandscan \
+          -appname "${{ inputs.project_veracode }}" \
+          -version "${{ github.run_id }}" \
+          -filepath "$ARTIFACT" \
+          -createprofile true \
+          -deleteincompletescan 2 \
+          -createsandbox $CREATESANDBOX \
+          $SANDBOX_OPT
