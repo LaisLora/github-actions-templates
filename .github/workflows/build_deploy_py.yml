@@ -17,7 +17,7 @@ on:
         description: 'Nome da policy do Veracode'
         required: false
         type: string
-        default: 'Politica-de-seguranca-Legados'  
+        default: 'AFRIKA_AST'  
         
 env:
   PROJECT: ${{ inputs.project_veracode }}
