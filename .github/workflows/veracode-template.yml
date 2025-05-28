@@ -1,4 +1,4 @@
-# .github/workflows/veracode-template.yml
+# .github/workflows/veracode-template.yml JAVA MAVEN && JAVASCRIPT 
 
 on:
   workflow_call:
