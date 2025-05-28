@@ -104,7 +104,7 @@ jobs:
         run: |
           declare -A MAP=( ["python.py"]="WORKSPACE_PY"
                            ["aplica-o_vul_py"]="WORKSPACE_PY"
-                           ["app_vul_php"]="WORKSPACE_PHP" 
+                           ["Sitebase"]="WORKSPACE_PHP" 
                            
                            #Coloque acima os projetos e seus respectivos workspaces )
                            
