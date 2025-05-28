@@ -44,43 +44,53 @@ jobs:
         with:
           php-version: ${{ inputs.php_version || '8.2' }}   # ajuste se precisar 8.1, 7.4…
 
-      # 3) instala dependências do projeto — requisito 
-      - name: Composer install
+      - name: Locate composer.json
+        id: comp
         shell: bash
         run: |
-          if [ -f "composer.json" ]; then
-            composer install --no-interaction --prefer-dist --no-progress
-          else
-            echo "::error::composer.json não encontrado; verifique o repositório."
+          # Procura apenas no primeiro nível onde houver composer.json
+          COMPOSER_PATH=$(git ls-files -- */composer.json | head -n 1)
+          if [[ -z "$COMPOSER_PATH" ]]; then
+            echo "::error::Nenhum composer.json encontrado no repositório"
             exit 1
           fi
+          DIR=$(dirname "$COMPOSER_PATH")
+          echo "composer_dir=$DIR"     >> $GITHUB_OUTPUT
+          echo "Composer encontrado em: $DIR"
 
-      # 4) empacota usando o Veracode CLI — requisito ④
-      - name: Veracode Auto-Pack
+# 2️⃣ Instala dependências do PHP/Laravel
+      - name: Composer install
         shell: bash
+        working-directory: ${{ steps.comp.outputs.composer_dir }}
         run: |
-          mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
-          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-
-          # empacota todo o source + vendor
-          ./veracode package \
-            --source . \
-            --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
-            --trust
-
-          # unzip/rezip para padronizar nome do artefato
-          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
-            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
-
-          rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
-          zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
-          mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
-
-      # 5) publica o ZIP para os próximos jobs
-      - uses: actions/upload-artifact@v4
-        with:
-          name: analysisPack
-          path: artifacts/${{ inputs.build-id }}/analysisPack.zip
+          composer install --no-interaction --prefer-dist --no-progress
+      
+            # 4) empacota usando o Veracode CLI — requisito ④
+            - name: Veracode Auto-Pack
+              shell: bash
+              run: |
+                mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+                curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+      
+                # empacota todo o source + vendor
+                ./veracode package \
+                  --source . \
+                  --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
+                  --trust
+      
+                # unzip/rezip para padronizar nome do artefato
+                find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
+                  | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+      
+                rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
+                zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+                mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
+      
+            # 5) publica o ZIP para os próximos jobs
+            - uses: actions/upload-artifact@v4
+              with:
+                name: analysisPack
+                path: artifacts/${{ inputs.build-id }}/analysisPack.zip
 
 # JOB 2 — SCA
 # ------------------------------------------------------
