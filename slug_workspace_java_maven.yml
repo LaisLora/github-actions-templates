@@ -115,8 +115,8 @@ jobs:
         run: |
           declare -A WORKSPACE_SECRET_MAP
           WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
-          WORKSPACE_SECRET_MAP["clienterei-frontend"]="WORKSPACE_WEBAPP"
-          WORKSPACE_SECRET_MAP["clientereides"]="WORKSPACE_AKS"
+          WORKSPACE_SECRET_MAP["projeto1"]="WORKSPACE_WEBAPP"
+          WORKSPACE_SECRET_MAP["projeto2"]="WORKSPACE_AKS"
           # ↑ mantenha a tabela empresarial aqui
   
           secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
