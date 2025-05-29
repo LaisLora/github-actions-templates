@@ -275,7 +275,7 @@ jobs:
               -vid $VID -vkey $VKEY \
               -action uploadandscan \
               -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
-              -version "${{ inputs.build-id }}" \
+              -version "${{ github.run_id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
               -deleteincompletescan 2 \
@@ -286,7 +286,7 @@ jobs:
               -vid $VID -vkey $VKEY \
               -action uploadandscan \
               -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
-              -version "${{ inputs.build-id }}" \
+              -version "${{ github.run_id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
               -deleteincompletescan 2 \
