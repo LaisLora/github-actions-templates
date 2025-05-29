@@ -298,7 +298,7 @@ jobs:
               ARTIFACT="analysisPack.zip"
             fi
           fi
-      
+       
           if [ "$ENVIRONMENT" == "prod" ]; then
             echo "Executando SAST em ambiente de produção..."
             java -jar vosp-api-wrappers-java-24.7.14.0.jar \
