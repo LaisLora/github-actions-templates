@@ -20,6 +20,10 @@ on:
         required: true
         type: string
 
+env:
+  PROJECT: ${{ inputs.project_veracode }}
+  ENVIRONMENT: ${{ inputs.environment }}
+
 jobs:
 
   # ─── AutoPack ────────────────────────────────────────────────────────────────
@@ -275,7 +279,7 @@ jobs:
               -vid $VID -vkey $VKEY \
               -action uploadandscan \
               -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
-              -version "${{ github.run_id }}" \
+              -version "${{ inputs.build-id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
               -deleteincompletescan 2 \
@@ -286,7 +290,7 @@ jobs:
               -vid $VID -vkey $VKEY \
               -action uploadandscan \
               -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
-              -version "${{ github.run_id }}" \
+              -version "${{ inputs.build-id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
               -deleteincompletescan 2 \
@@ -294,4 +298,3 @@ jobs:
               -sandboxname "$ENVIRONMENT" \
               -debug
           fi
-
