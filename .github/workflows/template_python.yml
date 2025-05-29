@@ -27,10 +27,6 @@ on:
         type: string
         default: 'AFRIKA_AST'
 
-      python_version:
-        description: Versão do Python
-        required: false
-        type: string
 ########################################################
 jobs:
 ########################################################
