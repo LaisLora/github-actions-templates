@@ -172,20 +172,25 @@ jobs:
           fi
 
       - name: Policy Name Substitution
-        id: policy-remap
-        shell: bash
+        id: policy-name-sub
         run: |
-          echo "policy=${{ inputs.veracode_policy_name }}" >> $GITHUB_OUTPUT
-          declare -A PMAP=(
-            ["verademo3"]="AFRIKA_AST"
-            ["node.js.verademo"]="Veracode Recommended Very High + SCA v1"
-          )
-          ALT=${PMAP[${{ inputs.project_veracode }}]}
-          if [[ -n "$ALT" ]]; then
-            echo "policy=$ALT" >> $GITHUB_OUTPUT
-          fi
-
-      # 4) Executa o Pipeline Scan usando o arquivo detectado
+        
+            # Setar policy default
+            echo "policy_veracode_sub=${{ inputs.veracode_policy_name }}" >> "$GITHUB_OUTPUT"
+            
+            # Forçar policy 
+            declare -A POLICY_MAP
+            POLICY_MAP["python.py"]="AFRIKA_AST"
+            POLICY_MAP["aplica-o_vul_py"]="AFRIKA_AST"
+            POLICY_MAP["verademo3"]="AFRIKA_AST"
+            
+            ###colocar os outros projetos
+            
+            if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
+                            echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
+                            echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
+            fi
+          
       - name: Executar Veracode Pipeline Scan
         uses: veracode/Veracode-pipeline-scan-action@v1.0.18
         with:
@@ -195,3 +200,55 @@ jobs:
           veracode_policy_name: ${{ steps.policy-name-sub.outputs.policy_veracode_sub }}
           #fail_build: true
           fail_build: ${{ inputs.environment == 'prod' }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScanResults
+          path: results.json
+
+# ------------------------------------------------------
+# JOB 4 — SAST
+# ------------------------------------------------------
+  SAST:
+    needs: autopack
+    runs-on: ubuntu-24.04
+    steps:
+    # 1. baixa o artefato gerado pelo AutoPack
+    - uses: actions/download-artifact@v4
+      with: { name: analysisPack }
+
+    # 2. baixa o wrapper Java do Veracode
+    - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
+    # 3. executa o SAST usando apenas analysisPack.zip
+    - name: Executar Veracode SAST
+      env:
+        VID:  ${{ secrets.APIID_VERACODE }}
+        VKEY: ${{ secrets.APIKEY_VERACODE }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      shell: bash
+      run: |
+        ARTIFACT="analysisPack.zip"
+        [[ ! -f "$ARTIFACT" ]] && { echo "::error::analysisPack.zip não encontrado"; exit 1; }
+
+        if [ "$ENVIRONMENT" = "prod" ]; then
+          CREATESANDBOX=false
+          SANDBOX_OPT=""
+        else
+          CREATESANDBOX=true
+          SANDBOX_OPT="-sandboxname $ENVIRONMENT"
+        fi
+
+        java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+          -vid $VID -vkey $VKEY \
+          -action uploadandscan \
+          -appname "${{ inputs.project_veracode }}" \
+          -version "${{ github.run_id }}" \
+          -filepath "$ARTIFACT" \
+          -createprofile true \
+          -deleteincompletescan 2 \
+          -createsandbox $CREATESANDBOX \
+          $SANDBOX_OPT
+
+
+
