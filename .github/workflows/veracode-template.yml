@@ -210,45 +210,88 @@ jobs:
 # JOB 4 — SAST
 # ------------------------------------------------------
   SAST:
-    needs: autopack
     runs-on: ubuntu-24.04
+    needs: autopack
     steps:
-    # 1. baixa o artefato gerado pelo AutoPack
-    - uses: actions/download-artifact@v4
-      with: { name: analysisPack }
+      - name: Baixar Artefato para Análise SAST
+        uses: actions/download-artifact@v4
+        with:
+          name: analysisPack
 
-    # 2. baixa o wrapper Java do Veracode
-    - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+      - name: Baixar Veracode SAST Wrapper
+        run: |
+          curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
 
-    # 3. executa o SAST usando apenas analysisPack.zip
-    - name: Executar Veracode SAST
-      env:
-        VID:  ${{ secrets.APIID_VERACODE }}
-        VKEY: ${{ secrets.APIKEY_VERACODE }}
-        ENVIRONMENT: ${{ inputs.environment }}
-      shell: bash
-      run: |
-        ARTIFACT="analysisPack.zip"
-        [[ ! -f "$ARTIFACT" ]] && { echo "::error::analysisPack.zip não encontrado"; exit 1; }
+      - name: Project Name Substitution
+        id: project-name-sub
+        run: |
+          # Caso projeto não esteja no map, utiliza o nome padrão
+          echo "project_veracode_sub=${{ inputs.project_veracode }}" >> "$GITHUB_OUTPUT"
+          
+          # Criar o mapeamento de nomes dos projetos
+          declare -A PROJECT_MAP
+          PROJECT_MAP["veracode3"]="verademo3"
+          PROJECT_MAP["nomeprojetozuado02"]="novonomeprojeto02"
+          PROJECT_MAP["simulacreditodes"]="simulacredito-api"
 
-        if [ "$ENVIRONMENT" = "prod" ]; then
-          CREATESANDBOX=false
-          SANDBOX_OPT=""
-        else
-          CREATESANDBOX=true
-          SANDBOX_OPT="-sandboxname $ENVIRONMENT"
-        fi
+          ##PROJECT_MAP["project"]="name"
+                    
+          
+          # Setar o nome do projeto, se houver mapeamento
+          if [[ ${PROJECT_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
+            echo "Definindo novo nome para de ${{ inputs.project_veracode }} para ${PROJECT_MAP[${{ inputs.project_veracode }}]}"
+            echo "project_veracode_sub=${PROJECT_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
+          fi
 
-        java -jar vosp-api-wrappers-java-24.7.14.0.jar \
-          -vid $VID -vkey $VKEY \
-          -action uploadandscan \
-          -appname "${{ inputs.project_veracode }}" \
-          -version "${{ github.run_id }}" \
-          -filepath "$ARTIFACT" \
-          -createprofile true \
-          -deleteincompletescan 2 \
-          -createsandbox $CREATESANDBOX \
-          $SANDBOX_OPT
+      - name: Read Project Name Substitution
+        run: echo "${{ steps.project-name-sub.outputs.project_veracode_sub }}"
 
-
+      - name: Executar Veracode SAST
+        env:
+          VID: ${{ secrets.APIID_VERACODE }}
+          VKEY: ${{ secrets.APIKEY_VERACODE }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          # Verifica se existe um WAR
+          WAR_FILE=$(find . -maxdepth 2 -name "*.war" | head -n 1)
+          if [ -f "$WAR_FILE" ]; then
+            echo "Aplicação WAR detectada. Usando arquivo: $WAR_FILE"
+            ARTIFACT="$WAR_FILE"
+          else
+            # Procura por um JAR (excluindo o vosp-api-wrappers)
+            JAR_FILE=$(find . -maxdepth 2 -name "*.jar" -not -name "vosp-api-wrappers*.jar" | head -n 1)
+            if [ -f "$JAR_FILE" ]; then
+              echo "Java build detectado. Usando arquivo: $JAR_FILE"
+              ARTIFACT="$JAR_FILE"
+            else
+              echo "Nenhum WAR ou JAR encontrado. Usando analysisPack.zip."
+              ARTIFACT="analysisPack.zip"
+            fi
+          fi
+      
+          if [ "$ENVIRONMENT" == "prod" ]; then
+            echo "Executando SAST em ambiente de produção..."
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+              -vid $VID -vkey $VKEY \
+              -action uploadandscan \
+              -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
+              -version "${{ inputs.build-id }}" \
+              -filepath "$ARTIFACT" \
+              -createprofile true \
+              -deleteincompletescan 2 \
+              -createsandbox false
+          else
+            echo "Executando SAST em ambiente de sandbox..."
+            java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+              -vid $VID -vkey $VKEY \
+              -action uploadandscan \
+              -appname "${{ steps.project-name-sub.outputs.project_veracode_sub }}" \
+              -version "${{ inputs.build-id }}" \
+              -filepath "$ARTIFACT" \
+              -createprofile true \
+              -deleteincompletescan 2 \
+              -createsandbox true \
+              -sandboxname "$ENVIRONMENT" \
+              -debug
+          fi
 
