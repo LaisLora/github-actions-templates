@@ -8,7 +8,6 @@ on:
         required: true
         type: string
 
-      # testes com project name - jose victor
       project_veracode:
         description: 'Project'
         required: true
@@ -23,7 +22,7 @@ on:
         description: 'Policy do Veracode'
         required: false
         type: string
-        default: 'Embracon-Corporativa'
+        default: 'AFRIKA_AST'
 env:
   PROJECT: ${{ inputs.project_veracode }}
   ENVIRONMENT: ${{ inputs.environment }}
@@ -220,7 +219,7 @@ jobs:
             # Forçar policy 
             declare -A POLICY_MAP
             POLICY_MAP["verademo3"]="AFRIKA_AST"
-            POLICY_MAP["PROJETO2"]="AFRIKA_AST"
+            POLICY_MAP["node_verademo"]="AFRIKA_AST"
             POLICY_MAP["projeto3"]="Policy-Corporativa"
 
             
