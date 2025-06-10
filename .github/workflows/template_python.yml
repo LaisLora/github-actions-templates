@@ -159,8 +159,7 @@ jobs:
         env:
           SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
-          curl -sSL https://download.sourceclear.com/ci.sh | sh -s scan --update-advisor --uri-as-name --recursive
-
+          curl -sSL https://download.sourceclear.com/ci.sh | sh -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
 # ------------------------------------------------------
 # JOB 3 — Pipeline Scan
 # ------------------------------------------------------
