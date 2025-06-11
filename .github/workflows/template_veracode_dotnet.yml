@@ -28,27 +28,41 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'  # ou 6.0.x, dependendo do projeto
+          dotnet-version: '8.0.x'
 
-      - name: Restore & Build
+      - name: Restore & Build (.sln ou .csproj)
+        shell: bash
         run: |
-          if [ -f "*.sln" ]; then
-            dotnet restore
-            dotnet build --configuration Release --no-restore
+          set -e
+          SOLUTION=$(find . -name "*.sln" | head -n 1)
+          PROJECT=$(find . -name "*.csproj" | head -n 1)
+
+          if [[ -n "$SOLUTION" ]]; then
+            echo "🔍 Solução .sln detectada: $SOLUTION"
+            dotnet restore "$SOLUTION"
+            dotnet build "$SOLUTION" --configuration Release --no-restore
+          elif [[ -n "$PROJECT" ]]; then
+            echo "🔍 Projeto .csproj detectado: $PROJECT"
+            dotnet restore "$PROJECT"
+            dotnet build "$PROJECT" --configuration Release --no-restore
           else
-            echo "::error::Nenhum arquivo .sln encontrado"
+            echo "::error::Nenhum arquivo .sln ou .csproj encontrado"
             exit 1
           fi
 
       - name: Empacotar com Veracode CLI
+        shell: bash
         run: |
           mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
           curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+
           ./veracode package --source . \
                              --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
                              --trust
-          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
-            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+
+          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" |
+          while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+
           rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
           zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
           mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
@@ -57,7 +71,6 @@ jobs:
         with:
           name: analysisPack
           path: artifacts/${{ inputs.build-id }}/analysisPack.zip
-
   SCA:
     runs-on: ubuntu-24.04
     steps:
