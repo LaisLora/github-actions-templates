@@ -1,0 +1,215 @@
+name: Veracode-Python Template
+
+########################################################
+# 0. Parâmetros do workflow reutilizável
+########################################################
+on:
+  workflow_call:
+    inputs:
+      build-id:
+        description: ID único da build
+        required: true
+        type: string
+
+      environment:
+        description: Ambiente (dev, qa, prod)
+        required: true
+        type: string
+
+      project_veracode:
+        description: Nome lógico do projeto no Veracode
+        required: true
+        type: string
+
+########################################################
+jobs:
+########################################################
+
+# ------------------------------------------------------
+# JOB 1 — AutoPack
+# ------------------------------------------------------
+  AutoPack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1) Ambiente Python -------------------------------------------------
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version || '3.12' }}
+
+      # 2) Detectar + instalar dependências (Pipfile / Poetry / requirements)
+      - name: Instalar dependências (pipenv | poetry | requirements)
+        id: deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --upgrade pip
+
+          # ---------------- DETECÇÃO ----------------
+          mapfile -t PIPFILES  < <(git ls-files -- **/Pipfile)
+          mapfile -t POETRIES  < <(git ls-files -- **/pyproject.toml | xargs -r grep -l "\[tool.poetry\]")
+          mapfile -t REQS      < <(git ls-files -- **/requirements*.txt | sort)
+
+          echo "📦  Arquivos detectados:"
+          printf "  • Pipfile.............: %s\n"  "${PIPFILES[@]:-<nenhum>}"
+          printf "  • pyproject (Poetry)..: %s\n"  "${POETRIES[@]:-<nenhum>}"
+          printf "  • requirements........: %s\n"  "${REQS[@]:-<nenhum>}"
+
+          # ---------------- INSTALAÇÃO ---------------
+          ######## 1) Pipenv ##############################################
+          if [[ ${#PIPFILES[@]} -gt 0 ]]; then
+            echo "→ Instalando dependências de ${#PIPFILES[@]} Pipfile(s)"
+            python -m pip install -q pipenv
+            for pf in "${PIPFILES[@]}"; do
+              echo "   - $pf"
+              (
+                cd "$(dirname "$pf")"
+                if [[ -f Pipfile.lock ]]; then
+                  pipenv sync --dev
+                else
+                  pipenv install --dev --skip-lock
+                fi
+              )
+            done
+          fi
+
+          ######## 2) Poetry ###############################################
+          if [[ ${#POETRIES[@]} -gt 0 ]]; then
+            echo "→ Instalando dependências de ${#POETRIES[@]} pyproject(s)"
+            python -m pip install -q poetry
+            for pp in "${POETRIES[@]}"; do
+              echo "   - $pp"
+              (
+                cd "$(dirname "$pp")"
+                poetry install --no-interaction --no-root
+              )
+            done
+          fi
+
+          ######## 3) requirements*.txt ####################################
+          if [[ ${#REQS[@]} -gt 0 ]]; then
+            echo "→ Instalando dependências de ${#REQS[@]} requirements*.txt"
+            for rq in "${REQS[@]}"; do
+              echo "   - $rq"
+              pip install -r "$rq"
+            done
+          fi
+
+          ######## 4) Nenhum gerenciador? ##################################
+          if [[ ${#PIPFILES[@]} -eq 0 && ${#POETRIES[@]} -eq 0 && ${#REQS[@]} -eq 0 ]]; then
+            echo "⚠️  Nenhum arquivo de dependências encontrado; seguindo sem instalar libs"
+          fi
+          
+      # 3) Empacotar com o Veracode CLI  (SEM mudanças)
+      - name: Empacotar Artefatos para Scan
+        shell: bash
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+          ./veracode package --source . \
+                             --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
+                             --trust
+
+          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
+            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+
+          rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
+          zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysisPack
+          path: artifacts/${{ inputs.build-id }}/analysisPack.zip
+
+# ------------------------------------------------------
+# JOB 2 — SCA
+# ------------------------------------------------------
+  SCA:
+    name: SCA
+    runs-on: ubuntu-24.04  
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Veracode SCA scan
+        env:
+          SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+          SRCCLR_WORKSPACE_SLUG: ${{ secrets.WORKSPACE_PY }}
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh \
+            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
+# ------------------------------------------------------
+# JOB 3 — Pipeline Scan
+# ------------------------------------------------------
+  Scan:
+    name: ⏱️ Veracode Pipeline Scan
+    runs-on: ubuntu-24.04
+    needs: AutoPack
+    
+    steps:
+      # 1) Baixa o artifact com nome 'analysisPack'
+      - name: Baixar Artefato para Análise
+        uses: actions/download-artifact@v4
+        with:
+          name: analysisPack
+  
+      # 2) (Opcional) Listar arquivos baixados para confirmar o que veio
+      
+  
+      - name: Detectar arquivo de análise
+        id: detect_artifact
+        run: |
+            if [ -f "analysisPack.zip" ]; then
+              echo "Usando analysisPack.zip."
+              echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
+            else
+              echo "Erro: analysisPack.zip não encontrado"
+            fi
+          
+      - name: Executar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+        with:
+          vid: ${{ secrets.APIID_VERACODE }}
+          vkey: ${{ secrets.APIKEY_VERACODE }}
+          file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          fail_build: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScanResults
+          path: results.json
+
+# ------------------------------------------------------
+# JOB 4 — SAST
+# ------------------------------------------------------
+  SAST:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    steps:
+    # 1. baixa o artefato gerado pelo AutoPack
+    - uses: actions/download-artifact@v4
+      with: { name: analysisPack }
+
+    # 2. baixa o wrapper Java do Veracode
+    - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
+    # 3. executa o SAST usando apenas analysisPack.zip
+    - name: Executar Veracode SAST
+      env:
+        VID:  ${{ secrets.APIID_VERACODE }}
+        VKEY: ${{ secrets.APIKEY_VERACODE }}
+        ENVIRONMENT: ${{ inputs.environment }}
+      shell: bash
+      run: |
+        ARTIFACT="analysisPack.zip"
+        [[ ! -f "$ARTIFACT" ]] && { echo "::error::analysisPack.zip não encontrado"; exit 1; }
+
+        java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+          -vid $VID -vkey $VKEY \
+          -action uploadandscan \
+          -appname "${{ inputs.project_veracode }}" \
+          -version "${{ github.run_id }}" \
+          -filepath "$ARTIFACT" \
+          -createprofile true \
+          -deleteincompletescan 2 \
+          -createsandbox false
