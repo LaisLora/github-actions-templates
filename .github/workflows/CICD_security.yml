@@ -63,7 +63,7 @@ jobs:
   veracode:
     name: 🛡️ Executar Veracode SCA/SAST
     needs: checkout
-    uses: LaisLora/github-actions-templates/.github/workflows/template_2_maven_simpli@main
+    uses: LaisLora/github-actions-templates/.github/workflows/template_2_maven_simpli.yml@main
     secrets: inherit
     with:
       build-id: ${{ inputs.build-id }}
