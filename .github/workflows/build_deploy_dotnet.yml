@@ -36,3 +36,4 @@ jobs:
     with:
       build-id: ${{ inputs.build-id }}
       environment: ${{ inputs.environment }}
+      project_veracode: ${{ inputs.project }}
