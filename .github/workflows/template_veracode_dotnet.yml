@@ -1,0 +1,127 @@
+name: Veracode-DotNet Template
+
+on:
+  workflow_call:
+    inputs:
+      build-id:
+        description: ID único da build
+        required: true
+        type: string
+
+      environment:
+        description: Ambiente (dev, qa, prod)
+        required: true
+        type: string
+
+      project_veracode:
+        description: Nome lógico do projeto no Veracode
+        required: true
+        type: string
+
+jobs:
+
+  AutoPack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'  # ou 6.0.x, dependendo do projeto
+
+      - name: Restore & Build
+        run: |
+          if [ -f "*.sln" ]; then
+            dotnet restore
+            dotnet build --configuration Release --no-restore
+          else
+            echo "::error::Nenhum arquivo .sln encontrado"
+            exit 1
+          fi
+
+      - name: Empacotar com Veracode CLI
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+          ./veracode package --source . \
+                             --output "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" \
+                             --trust
+          find "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}" -name "*.zip" \
+            | while read f; do unzip -o -d "$(dirname "$f")" "$f"; done
+          rm -f "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"/*.zip
+          zip analysisPack.zip -r "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}"
+          mv analysisPack.zip "$GITHUB_WORKSPACE/artifacts/${{ inputs.build-id }}/analysisPack.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: analysisPack
+          path: artifacts/${{ inputs.build-id }}/analysisPack.zip
+
+  SCA:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Veracode SCA scan
+        env:
+          SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+          SRCCLR_WORKSPACE_SLUG: ${{ secrets.WORKSPACE_DOTNET }}
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh \
+            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
+
+  Scan:
+    name: Veracode Pipeline Scan
+    runs-on: ubuntu-24.04
+    needs: AutoPack
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: analysisPack
+
+      - name: Detectar arquivo de análise
+        id: detect_artifact
+        run: |
+          if [ -f "analysisPack.zip" ]; then
+            echo "artifact_file=analysisPack.zip" >> $GITHUB_OUTPUT
+          else
+            echo "::error::analysisPack.zip não encontrado"
+            exit 1
+          fi
+
+      - name: Executar Veracode Pipeline Scan
+        uses: veracode/Veracode-pipeline-scan-action@v1.0.18
+        with:
+          vid: ${{ secrets.APIID_VERACODE }}
+          vkey: ${{ secrets.APIKEY_VERACODE }}
+          file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          fail_build: false
+
+  SAST:
+    needs: AutoPack
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: analysisPack
+
+      - run: curl -O -L https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.7.14.0/vosp-api-wrappers-java-24.7.14.0.jar
+
+      - name: Executar Veracode SAST
+        env:
+          VID:  ${{ secrets.APIID_VERACODE }}
+          VKEY: ${{ secrets.APIKEY_VERACODE }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          ARTIFACT="analysisPack.zip"
+          [[ ! -f "$ARTIFACT" ]] && { echo "::error::analysisPack.zip não encontrado"; exit 1; }
+
+          java -jar vosp-api-wrappers-java-24.7.14.0.jar \
+            -vid $VID -vkey $VKEY \
+            -action uploadandscan \
+            -appname "${{ inputs.project_veracode }}" \
+            -version "${{ github.run_id }}" \
+            -filepath "$ARTIFACT" \
+            -createprofile true \
+            -deleteincompletescan 2 \
+            -createsandbox false
