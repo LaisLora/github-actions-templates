@@ -141,6 +141,7 @@ jobs:
       SCA_WORKSPACE_KAFKA: ${{ secrets.ecrets.SCA_WORKSPACE_KAFKA }}
       SCA_WORKSPACE_SLUG_OKE: ${{ secrets.SCA_WORKSPACE_OKE }}
       SCA_WORKSPACE_WEBAPP:  ${{ SCA_WORKSPACE_WEBAPP }}
+      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
   
     steps:
       - uses: actions/checkout@v4
@@ -151,7 +152,7 @@ jobs:
         shell: bash
         run: |
           declare -A WORKSPACE_SECRET_MAP
-          WORKSPACE_SECRET_MAP["projeto1"]="SCA_WORKSPACE_AKS"
+          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
           WORKSPACE_SECRET_MAP["clientereides"]="SCA_WORKSPACE_AKS"
           WORKSPACE_SECRET_MAP["clienterei-frontend"]="SCA_WORKSPACE_WEBAPP"
           WORKSPACE_SECRET_MAP["desenvolvimento-login-homol"]="SCA_WORKSPACE_WEBAPP"
