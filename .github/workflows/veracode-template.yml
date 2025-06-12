@@ -1,4 +1,4 @@
-name: Veracode Template v5
+name: Veracode Template v6
 
 on:
   workflow_call:
@@ -45,25 +45,31 @@ jobs:
           fi
 
       - name: Detectar versão do Java no pom.xml
-        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
-        id: detect_java
-        run: |
-          # Padrão de fallback
-          JAVA_VERSION="11"
+  if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+  id: detect_java
+  run: |
+    # Tenta extrair o valor de <maven.compiler.source> do pom.xml
+    JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+    if [[ "$JAVA_VERSION" == "11" ]]; then
+      JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
+    fi
+    if [[ "$JAVA_VERSION" == "\${java.version}" ]]; then
+      JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
+    fi
 
-          # Extrair possíveis versões
-          RAW_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || true)
-          [[ -z "$RAW_VERSION" || "$RAW_VERSION" == "11" ]] && RAW_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || true)
-          [[ "$RAW_VERSION" == "\${java.version}" ]] && RAW_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || true)
+    # Mapeamento para versões aceitas pelo setup-java
+    case "$JAVA_VERSION" in
+      1.7) JAVA_VERSION="7";;
+      1.8) JAVA_VERSION="8";;
+      7)   JAVA_VERSION="7";;
+      8)   JAVA_VERSION="8";;
+      11)  JAVA_VERSION="11";;
+      17)  JAVA_VERSION="17";;
+      *)   JAVA_VERSION="11";;
+    esac
 
-          # Mapeamento para versões aceitas pelo setup-java
-          case "$RAW_VERSION" in
-            1.7) JAVA_VERSION="7";;
-            1.8) JAVA_VERSION="8";;
-            11) JAVA_VERSION="11";;
-            17) JAVA_VERSION="17";;
-            *) JAVA_VERSION="11";;
-          esac
+    echo "Versão do Java detectada: $JAVA_VERSION"
+    echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
           echo "Versão Java bruta: $RAW_VERSION - Normalizada: $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
@@ -99,7 +105,7 @@ jobs:
             # Compacta o JAR em um zip para padronizar, se necessário
       
           else
-            echo "Nenhum WAR, JAR ou ZIP encontrado. Rodando Autopack..."
+            echo "Nenhum WAR, JAR encontrado. Rodando Autopack..."
             curl -fsS https://tools.veracode.com/veracode-cli/install | sh
             ./veracode package --source . --output ${{ github.workspace }}/artifacts/${{ inputs.build-id }} --trust
       
@@ -134,11 +140,10 @@ jobs:
       SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
   
       # Slugs dos workspaces (adicione quantos precisar)
-      SCA_WORKSPACE_AKS:   ${{ secrets.SCA_WORKSPACE_AKS }}
-      SCA_WORKSPACE_KAFKA: ${{ secrets.SCA_WORKSPACE_KAFKA }}
-      SCA_WORKSPACE_OKE:    ${{ secrets.SCA_WORKSPACE_OKE }}
-      SCA_WORKSPACE_WEBAPP:  ${{ secrets.SCA_WORKSPACE_WEBAPP }}
-      WORKSPACE_JAVA:  ${{ secrets.WORKSPACE_JAVA }}
+      SCA_WORKSPACE_AKS: ${{ secrets.SCA_WORKSPACE_AKS }}
+      SCA_WORKSPACE_KAFKA: ${{ secrets.ecrets.SCA_WORKSPACE_KAFKA }}
+      SCA_WORKSPACE_SLUG_OKE: ${{ secrets.SCA_WORKSPACE_OKE }}
+      SCA_WORKSPACE_WEBAPP:  ${{ SCA_WORKSPACE_WEBAPP }}
   
     steps:
       - uses: actions/checkout@v4
@@ -150,11 +155,9 @@ jobs:
         run: |
           declare -A WORKSPACE_SECRET_MAP
           WORKSPACE_SECRET_MAP["projeto1"]="SCA_WORKSPACE_AKS"
-          WORKSPACE_SECRET_MAP["projeto2"]="SCA_WORKSPACE_KAFKA"
-          WORKSPACE_SECRET_MAP["projeto3"]="SCA_WORKSPACE_OKE"
-          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
-          
-          # ↑ mantenha a tabela empresarial aqui
+          WORKSPACE_SECRET_MAP["clientereides"]="SCA_WORKSPACE_AKS"
+          WORKSPACE_SECRET_MAP["clienterei-frontend"]="SCA_WORKSPACE_WEBAPP"
+          WORKSPACE_SECRET_MAP["desenvolvimento-login-homol"]="SCA_WORKSPACE_WEBAPP"
   
           secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
   
@@ -227,15 +230,67 @@ jobs:
             
             # Forçar policy 
             declare -A POLICY_MAP
-            POLICY_MAP["verademo3"]="AFRIKA_AST"
-            POLICY_MAP["node_verademo"]="AFRIKA_AST"
-            POLICY_MAP["projeto3"]="Policy-Corporativa"
-
+            POLICY_MAP["transferenciacota-api"]="Politica-de-seguranca-Legados"
+            POLICY_MAP["hierarquia-service"]="Embracon-hierarquia_boavista"
+            POLICY_MAP["embrapay-api"]="Embracon-Corporativa"
+            POLICY_MAP["clientereides"]="Embracon-clientereides"
+            POLICY_MAP["boavistaapi"]="Embracon-hierarquia_boavista"
+            POLICY_MAP["extratocota-service"]="Embracon-Corporativa"
+            POLICY_MAP["embraconutils"]="Embracon-Corporativa"
+            POLICY_MAP["mapacomissaoservice"]="Embracon-mapacomissaoservice-api"
+            POLICY_MAP["nomedoprojeto-api"]="nomedapolicy"
+            POLICY_MAP["logindes"]="Embracon-login-api"
+            POLICY_MAP["simulacreditodes"]="Embracon-simulacredito-api"
+            POLICY_MAP["embracon-api"]="Embracon-embracon-api"
+            POLICY_MAP["embrapagdes"]="Embracon-embrapag-api"
+            POLICY_MAP["area-restrita-api"]="Embracon-area-restrita-api"
+            POLICY_MAP["evento-cotades"]="Embracon-Corporativa"
+            POLICY_MAP["boleto-service"]="Embracon-Corporativa"
+            POLICY_MAP["documentos-api"]="Embracon-Corporativa"
+            POLICY_MAP["logs-backend"]="Embracon-logs-backend"
+            POLICY_MAP["gebol-captcha"]="Embracon-gebol-captcha-api" 
+            POLICY_MAP["gebol-business"]="Embracon-gebol-business-api" 
+            POLICY_MAP["gebol-core"]="Embracon-gebol-core-api"
+            POLICY_MAP["processarslipjob"]="Embracon-Corporativa"
+            POLICY_MAP["procon"]="Embracon-Corporativa"
+            POLICY_MAP["assinaturaeletronica"]="Embracon-assinaturaeletronica-api"
+            POLICY_MAP["integracao-api"]="Embracon-integracao-api"
+            POLICY_MAP["baasrw"]="Embracon-baas_baasrw"
+            POLICY_MAP["geradorboleto-api"]="Embracon-geradorboleto-api"
+            POLICY_MAP["rating-api"]="Embracon-rating-api"
+            POLICY_MAP["sender-marketingcloud-api"]="Embracon-sender-marketingcloud-api"
+            POLICY_MAP["portal-corretora"]="Embracon-portal-corretora-api"
+            POLICY_MAP["integracaosf"]="Embracon-integracaosf-api"
+            POLICY_MAP["embracon-api-assembleia"]="Embracon-Corporativa"
+            POLICY_MAP["embracon-api-pagamentos"]="Embracon-Corporativa"
+            POLICY_MAP["embracon-api-login"]="Embracon-Corporativa"
+            POLICY_MAP["embracon-api-vendas"]="Embracon-Corporativa"
+            POLICY_MAP["embracon-api-clientes"]="Embracon-Corporativa"
+            POLICY_MAP["embracon-api-simulacoes"]="Embracon-Corporativa"
+            POLICY_MAP["gebol-frontend"]="Embracon-gebol-frontend"
+            POLICY_MAP["assinaturaeletronica-admin"]="Embracon-assinaturaeletronica-admin"
+            POLICY_MAP["clienterei-frontend"]="Embracon-clienterei-frontend"
+            POLICY_MAP["reset-senha-front"]="Embracon-reset-senha-front"
+            POLICY_MAP["compliance"]="Embracon-compliance"
+            POLICY_MAP["geradorboleto-web"]="Embracon-GeradorBoleto_WebatendFront"
+            POLICY_MAP["transferenciacota-front"]="Embracon-transferenciacota-front"
+            POLICY_MAP["rating-web"]="Embracon-rating-web"
+            POLICY_MAP["portaldocumentacao-frontend"]="Embracon-portaldocumentacao-frontend_logsfrontend"
+            POLICY_MAP["file-service-dev"]="Embracon-file-service"
+            POLICY_MAP["webatendimento-api"]="Embracon-webatendimentointegration_webatendimentoapi"
+            POLICY_MAP["webatendimento-integration-support"]="Embracon-webatendimentointegration_webatendimentoapi"
+            POLICY_MAP["embracon-webatendimento-frontend-partner-customization"]="Embracon-Corporativa"
+            POLICY_MAP["webatendimento-pwa"]="Embracon-GeradorBoleto_WebatendFront"
+            POLICY_MAP["portal-corretora-front"]="Embracon-CorretoraFront"
+            POLICY_MAP["baas"]="Embracon-baas_baasrw"
+            POLICY_MAP["simplimais-api"]="Embracon-Corporativa"
+            
             
             if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
                 echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
                 echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
             fi
+
 
       # 4) Executa o Pipeline Scan usando o arquivo detectado
       - name: Executar Veracode Pipeline Scan
@@ -269,9 +324,28 @@ jobs:
           
           # Criar o mapeamento de nomes dos projetos
           declare -A PROJECT_MAP
-          PROJECT_MAP["nomeproje1"]="novonomeprojeto"
-          PROJECT_MAP["nomeprojeto2"]="novonomeprojeto02"
-
+          PROJECT_MAP["nomeprojetozuado"]="novonomeprojeto"
+          PROJECT_MAP["nomeprojetozuado02"]="novonomeprojeto02"
+          PROJECT_MAP["simulacreditodes"]="simulacredito-api"
+          PROJECT_MAP["embrapagdes"]="embrapag-api"
+          PROJECT_MAP["portal-corretora"]="portal-corretora-api"
+          PROJECT_MAP["mapacomissaoservice"]="mapacomissaoservice-api"
+          PROJECT_MAP["boavistaapi"]="boavista-api"
+          PROJECT_MAP["evento-cotades"]="evento-cota-api"
+          PROJECT_MAP["extratocota-service"]="extratocota-service-api"
+          PROJECT_MAP["hierarquia-service"]="hierarquia-service-api"
+          PROJECT_MAP["procon"]="procon-api"
+          PROJECT_MAP["embraconutils"]="embraconutils-api"
+          PROJECT_MAP["logindes"]="login-api" 
+          PROJECT_MAP["gebol-captcha"]="gebol-captcha-api" 
+          PROJECT_MAP["gebol-business"]="gebol-business-api" 
+          PROJECT_MAP["gebol-core"]="gebol-core-api" 
+          PROJECT_MAP["assinaturaeletronica"]="assinaturaeletronica-api" 
+          PROJECT_MAP["integracaosf"]="integracaosf-api"
+          PROJECT_MAP["portal-corretora"]="portal-corretora-api"
+          PROJECT_MAP["webatendimento-integration-support"]="webatendimento-integration"
+          PROJECT_MAP["embracon-webatendimento-frontend-partner-customization"]="embracon-webatendimento-admin"
+          PROJECT_MAP["webatendimento-pwa"]="webatendimento-frontend"
           ##PROJECT_MAP["project"]="name"
                     
           
