@@ -67,11 +67,8 @@ jobs:
             17)  JAVA_VERSION="17";;
             *)   JAVA_VERSION="11";;
           esac
-
-    echo "Versão do Java detectada: $JAVA_VERSION"
-    echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
-
-          echo "Versão Java bruta: $RAW_VERSION - Normalizada: $JAVA_VERSION"
+      
+          echo "Versão do Java detectada: $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
       - name: Configurar JDK e Maven
