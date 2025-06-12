@@ -140,7 +140,7 @@ jobs:
       SCA_WORKSPACE_AKS: ${{ secrets.SCA_WORKSPACE_AKS }}
       SCA_WORKSPACE_KAFKA: ${{ secrets.ecrets.SCA_WORKSPACE_KAFKA }}
       SCA_WORKSPACE_SLUG_OKE: ${{ secrets.SCA_WORKSPACE_OKE }}
-      SCA_WORKSPACE_WEBAPP:  ${{ SCA_WORKSPACE_WEBAPP }}
+      SCA_WORKSPACE_WEBAPP:  ${{ secrets.SCA_WORKSPACE_WEBAPP }}
       WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
   
     steps:
