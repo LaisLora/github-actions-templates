@@ -48,15 +48,24 @@ jobs:
         if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
         id: detect_java
         run: |
-          # Tenta extrair o valor de <maven.compiler.source> do pom.xml
-          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-          if [[ "$JAVA_VERSION" == "11" ]]; then
-            JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
-          fi
-          if [[ "$JAVA_VERSION" == "\${java.version}" ]]; then
-            JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
-          fi
-          echo "Versão do Java detectada: $JAVA_VERSION"
+          # Padrão de fallback
+          JAVA_VERSION="11"
+
+          # Extrair possíveis versões
+          RAW_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || true)
+          [[ -z "$RAW_VERSION" || "$RAW_VERSION" == "11" ]] && RAW_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || true)
+          [[ "$RAW_VERSION" == "\${java.version}" ]] && RAW_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || true)
+
+          # Mapeamento para versões aceitas pelo setup-java
+          case "$RAW_VERSION" in
+            1.7) JAVA_VERSION="7";;
+            1.8) JAVA_VERSION="8";;
+            11) JAVA_VERSION="11";;
+            17) JAVA_VERSION="17";;
+            *) JAVA_VERSION="11";;
+          esac
+
+          echo "Versão Java bruta: $RAW_VERSION - Normalizada: $JAVA_VERSION"
           echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
 
       - name: Configurar JDK e Maven
