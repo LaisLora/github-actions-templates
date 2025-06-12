@@ -45,28 +45,28 @@ jobs:
           fi
 
       - name: Detectar versão do Java no pom.xml
-  if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
-  id: detect_java
-  run: |
-    # Tenta extrair o valor de <maven.compiler.source> do pom.xml
-    JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
-    if [[ "$JAVA_VERSION" == "11" ]]; then
-      JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
-    fi
-    if [[ "$JAVA_VERSION" == "\${java.version}" ]]; then
-      JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
-    fi
-
-    # Mapeamento para versões aceitas pelo setup-java
-    case "$JAVA_VERSION" in
-      1.7) JAVA_VERSION="7";;
-      1.8) JAVA_VERSION="8";;
-      7)   JAVA_VERSION="7";;
-      8)   JAVA_VERSION="8";;
-      11)  JAVA_VERSION="11";;
-      17)  JAVA_VERSION="17";;
-      *)   JAVA_VERSION="11";;
-    esac
+        if: ${{ steps.check_maven.outputs.java_maven == 'true' }}
+        id: detect_java
+        run: |
+          # Tenta extrair o valor de <maven.compiler.source> do pom.xml
+          JAVA_VERSION=$(grep -oPm1 "(?<=<maven.compiler.source>)[^<]+" pom.xml || echo "11")
+          if [[ "$JAVA_VERSION" == "11" ]]; then
+            JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
+          fi
+          if [[ "$JAVA_VERSION" == "\${java.version}" ]]; then
+            JAVA_VERSION=$(grep -oPm1 "(?<=<java.version>)[^<]+" pom.xml || echo "11")
+          fi
+      
+          # Mapeamento para versões aceitas pelo setup-java
+          case "$JAVA_VERSION" in
+            1.7) JAVA_VERSION="7";;
+            1.8) JAVA_VERSION="8";;
+            7)   JAVA_VERSION="7";;
+            8)   JAVA_VERSION="8";;
+            11)  JAVA_VERSION="11";;
+            17)  JAVA_VERSION="17";;
+            *)   JAVA_VERSION="11";;
+          esac
 
     echo "Versão do Java detectada: $JAVA_VERSION"
     echo "java_version=$JAVA_VERSION" >> $GITHUB_OUTPUT
