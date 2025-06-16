@@ -288,14 +288,7 @@ jobs:
             if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
                 echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
                 echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
-            fi
-      - name: Download Policy
-        run: |
-          java -jar pipeline-scan.jar \
-            --veracode_api_id ${{ secrets.APIID_VERACODE }} \
-            --veracode_api_key ${{ secrets.APIKEY_VERACODE }} \
-            --request_policy="${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
-        
+            fi        
 
       # 4) Executa o Pipeline Scan usando o arquivo detectado
       - name: Executar Veracode Pipeline Scan
@@ -304,6 +297,7 @@ jobs:
           vid: ${{ secrets.APIID_VERACODE }}
           vkey: ${{ secrets.APIKEY_VERACODE }}
           file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          request_policy: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
           policy_file: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}.json"
           fail_build: ${{ inputs.environment == 'prod' }}
 
