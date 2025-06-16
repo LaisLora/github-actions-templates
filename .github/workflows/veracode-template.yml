@@ -126,56 +126,56 @@ jobs:
           retention-days: 1
 
   # ─── Veracode SCA (com Workspace Map no próprio job) ──────────────────────────
-#  SCA:
-#    name: SCA
-#    runs-on: ubuntu-24.04
-#
+  SCA:
+    name: SCA
+    runs-on: ubuntu-24.04
+
   # 3.1 – Expõe TODOS os secrets de slug como variáveis de ambiente
   #       Assim podemos referenciá-los por expansão indireta (${!var})
-#    env:
-#      # Token do agente organizacional
-#      SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
+    env:
+      # Token do agente organizacional
+      SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
   
       # Slugs dos workspaces (adicione quantos precisar)
-#      SCA_WORKSPACE_AKS: ${{ secrets.SCA_WORKSPACE_AKS }}
-#      SCA_WORKSPACE_KAFKA: ${{ secrets.ecrets.SCA_WORKSPACE_KAFKA }}
-#      SCA_WORKSPACE_SLUG_OKE: ${{ secrets.SCA_WORKSPACE_OKE }}
-#      SCA_WORKSPACE_WEBAPP:  ${{ secrets.SCA_WORKSPACE_WEBAPP }}
-#      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
+      SCA_WORKSPACE_AKS: ${{ secrets.SCA_WORKSPACE_AKS }}
+      SCA_WORKSPACE_KAFKA: ${{ secrets.ecrets.SCA_WORKSPACE_KAFKA }}
+      SCA_WORKSPACE_SLUG_OKE: ${{ secrets.SCA_WORKSPACE_OKE }}
+      SCA_WORKSPACE_WEBAPP:  ${{ secrets.SCA_WORKSPACE_WEBAPP }}
+      WORKSPACE_JAVA:   ${{ secrets.WORKSPACE_JAVA }}
   
-#    steps:
-#      - uses: actions/checkout@v4
-#  
-#      # 3.2 – Resolve dinamicamente qual secret contém o slug
-#      - name: Resolve workspace slug
-#        id: slug
-#        shell: bash
-#        run: |
-#          declare -A WORKSPACE_SECRET_MAP
-#          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
-#          WORKSPACE_SECRET_MAP["clientereides"]="SCA_WORKSPACE_AKS"
-#          WORKSPACE_SECRET_MAP["clienterei-frontend"]="SCA_WORKSPACE_WEBAPP"
-#          WORKSPACE_SECRET_MAP["desenvolvimento-login-homol"]="SCA_WORKSPACE_WEBAPP"
-#  
-#          secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
-#  
-#          if [[ -z "$secret_name" ]]; then
-#            echo "::error::Projeto '${{ inputs.project_veracode }}' sem mapeamento de workspace."
-#            exit 1
-#          fi
+    steps:
+      - uses: actions/checkout@v4
+  
+      # 3.2 – Resolve dinamicamente qual secret contém o slug
+      - name: Resolve workspace slug
+        id: slug
+        shell: bash
+        run: |
+          declare -A WORKSPACE_SECRET_MAP
+          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
+          WORKSPACE_SECRET_MAP["clientereides"]="SCA_WORKSPACE_AKS"
+          WORKSPACE_SECRET_MAP["clienterei-frontend"]="SCA_WORKSPACE_WEBAPP"
+          WORKSPACE_SECRET_MAP["desenvolvimento-login-homol"]="SCA_WORKSPACE_WEBAPP"
+  
+          secret_name="${WORKSPACE_SECRET_MAP[${{ inputs.project_veracode }}]}"
+  
+          if [[ -z "$secret_name" ]]; then
+            echo "::error::Projeto '${{ inputs.project_veracode }}' sem mapeamento de workspace."
+            exit 1
+          fi
   
           # Expansão indireta: obtém o valor do secret ($WORKSPACE_JAVA → slug real)
-#          slug_value="${!secret_name}"
-#          echo "slug=$slug_value" >>"$GITHUB_OUTPUT"
-#          echo "Usando workspace '$slug_value' (secret: $secret_name)"
+          slug_value="${!secret_name}"
+          echo "slug=$slug_value" >>"$GITHUB_OUTPUT"
+          echo "Usando workspace '$slug_value' (secret: $secret_name)"
   
       # 3.3 – Executa o agente SCA apontando para o slug resolvido
-#      - name: Run Veracode SCA scan
-#        env:
-#          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
-#        run: |
-#          curl -sSL https://download.sourceclear.com/ci.sh \
-#            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
+      - name: Run Veracode SCA scan
+        env:
+          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh \
+            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
 
 
   # ─── Veracode Pipeline Scan (mantém policy remap intacto) ────────────────────
