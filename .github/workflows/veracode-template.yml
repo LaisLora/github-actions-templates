@@ -289,7 +289,12 @@ jobs:
                 echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
                 echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
             fi        
-
+            
+      - name: Instalar CLI do Veracode e setar policy
+        run: |
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+                ./veracode policy get "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
+                
       # 4) Executa o Pipeline Scan usando o arquivo detectado
       - name: Executar Veracode Pipeline Scan
         uses: veracode/Veracode-pipeline-scan-action@v1.0.18
@@ -299,7 +304,13 @@ jobs:
           file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
           request_policy: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
           policy_file: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}.json"
+          veracode_policy_name: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
           fail_build: ${{ inputs.environment == 'prod' }}
+
+      - name: Instalar CLI do Veracode e setar policy
+        run: |
+          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+                ./veracode policy get "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
 
   SAST:
     runs-on: ubuntu-24.04
