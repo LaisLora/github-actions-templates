@@ -175,7 +175,7 @@ jobs:
           SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
           curl -sSL https://download.sourceclear.com/ci.sh \
-            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive --policy_name "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}" --fail_on_policy true
+            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive --fail_on_policy true
 
 
   # ─── Veracode Pipeline Scan (mantém policy remap intacto) ────────────────────
