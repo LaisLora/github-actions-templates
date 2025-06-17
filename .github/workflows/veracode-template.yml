@@ -307,11 +307,6 @@ jobs:
           veracode_policy_name: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
           fail_build: ${{ inputs.environment == 'prod' }}
 
-      - name: Instalar CLI do Veracode e setar policy
-        run: |
-          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-                ./veracode policy get "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
-
   SAST:
     runs-on: ubuntu-24.04
     needs: AutoPack
