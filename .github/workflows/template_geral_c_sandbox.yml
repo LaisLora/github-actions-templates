@@ -226,16 +226,18 @@ jobs:
             # Setar policy default
             echo "policy_veracode_sub=${{ inputs.veracode_policy_name }}" >> "$GITHUB_OUTPUT"
             
-            # inclui no projeto a politica de scan do veracode, se não estiver mapeado, ele usa o default
+            # Inclui a política conforme o projeto. Se não for mapeado, ele usa o default
             declare -A POLICY_MAP
             POLICY_MAP["Verademo3"]="Politica_Verademo_SCA"
-            POLICY_MAP["Projeto2"]="Politica-de-seguranca-Legados"
+            POLICY_MAP["projeto1"]="Politica-de-seguranca-Legados"
+            POLICY_MAP["projeto2"]="Corporativa"
             
             
-            if [[ ${POLICY_MAP[${{ inputs._veracode }}]} != "" ]]; then
+            if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
                 echo "Forçar policy de ${{ inputs.veracode_policy_name }} para ${POLICY_MAP[${{ inputs.project_veracode }}]}"
                 echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
             fi        
+            
                 
       # 4) Executa o Pipeline Scan usando o arquivo detectado
       - name: Executar Veracode Pipeline Scan
@@ -244,8 +246,11 @@ jobs:
           vid: ${{ secrets.APIID_VERACODE }}
           vkey: ${{ secrets.APIKEY_VERACODE }}
           file: ${{ steps.detect_artifact.outputs.artifact_file }} --issue_details true
+          request_policy: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
+          policy_file: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}.json"
           veracode_policy_name: "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
-          fail_build: ${{ inputs.environment == 'prod' }} #Falha apenas em ambientes descrito como "prod"
+          fail_build: ${{ inputs.environment == 'prod' }}
+
 
   SAST:
     runs-on: ubuntu-24.04
