@@ -152,7 +152,7 @@ jobs:
         shell: bash
         run: |
           declare -A WORKSPACE_SECRET_MAP
-          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
+          WORKSPACE_SECRET_MAP["Verademo3"]="WORKSPACE_JAVA"
           WORKSPACE_SECRET_MAP["proj1"]="SCA_WORKSPACE_AKS"
           WORKSPACE_SECRET_MAP["proj2"]="SCA_WORKSPACE_WEBAPP"
           WORKSPACE_SECRET_MAP["proj3"]="SCA_WORKSPACE_WEBAPP"
