@@ -228,7 +228,7 @@ jobs:
             
             # Inclui a política conforme o projeto. Se não for mapeado, ele usa o default
             declare -A POLICY_MAP
-            POLICY_MAP["verademo3"]="Politica_Verademo_SCA"
+            POLICY_MAP["Verademo3"]="Politica_Verademo_SCA"
             POLICY_MAP["projeto1"]="Politica-de-seguranca-Legados"
             POLICY_MAP["projeto2"]="Embracon-Corporativa"
             
