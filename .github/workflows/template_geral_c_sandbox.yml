@@ -152,7 +152,7 @@ jobs:
         shell: bash
         run: |
           declare -A WORKSPACE_SECRET_MAP
-          WORKSPACE_SECRET_MAP["verademo3"]="WORKSPACE_JAVA"
+          WORKSPACE_SECRET_MAP["Verademo3"]="WORKSPACE_JAVA"
           WORKSPACE_SECRET_MAP["projeto1"]="SCA_WORKSPACE_AKS"
           WORKSPACE_SECRET_MAP["projeto2"]="SCA_WORKSPACE_WEBAPP"
           WORKSPACE_SECRET_MAP["projeto2"]="SCA_WORKSPACE_WEBAPP"
@@ -228,7 +228,7 @@ jobs:
             
             # inclui no projeto a politica de scan do veracode, se não estiver mapeado, ele usa o default
             declare -A POLICY_MAP
-            POLICY_MAP["verademo3"]="Politica_Verademo_SCA"
+            POLICY_MAP["Verademo3"]="Politica_Verademo_SCA"
             POLICY_MAP["Projeto2"]="Politica-de-seguranca-Legados"
             
             
