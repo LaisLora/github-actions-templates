@@ -230,7 +230,7 @@ jobs:
             declare -A POLICY_MAP
             POLICY_MAP["Verademo3"]="Politica_Verademo_SCA"
             POLICY_MAP["projeto1"]="Politica-de-seguranca-Legados"
-            POLICY_MAP["projeto2"]="Embracon-Corporativa"
+            POLICY_MAP["projeto2"]="Corporativa"
             
             
             if [[ ${POLICY_MAP[${{ inputs.project_veracode }}]} != "" ]]; then
