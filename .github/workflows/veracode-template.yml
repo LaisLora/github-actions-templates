@@ -238,10 +238,6 @@ jobs:
                 echo "policy_veracode_sub=${POLICY_MAP[${{ inputs.project_veracode }}]}" >> "$GITHUB_OUTPUT"
             fi        
             
-      - name: Instalar CLI do Veracode e setar policy
-        run: |
-          curl -fsS https://tools.veracode.com/veracode-cli/install | sh
-                ./veracode policy get "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}"
                 
       # 4) Executa o Pipeline Scan usando o arquivo detectado
       - name: Executar Veracode Pipeline Scan
