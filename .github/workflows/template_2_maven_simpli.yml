@@ -115,18 +115,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Executa sem continue-on-error em ambientes dev e homol
+      # Executa com continue-on-error em dev/homol
       - name: Executar Veracode SCA (Ambiente não-prod)
         if: ${{ env.ENVIRONMENT != 'prod' }}
+        continue-on-error: true
         env:
           SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
         run: |
           curl -sSL https://download.sourceclear.com/ci.sh | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
-
-      # Executa com continue-on-error em ambientes de prod
+  
+      # Executa normalmente em produção (bloqueia se der erro)
       - name: Executar Veracode SCA (Produção)
         if: ${{ env.ENVIRONMENT == 'prod' }}
-        continue-on-error: true
         env:
           SRCCLR_API_TOKEN: ${{ secrets.SCA_ORGANIZACIONAL }}
         run: |
