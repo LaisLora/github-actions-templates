@@ -169,8 +169,19 @@ jobs:
           echo "slug=$slug_value" >>"$GITHUB_OUTPUT"
           echo "Usando workspace '$slug_value' (secret: $secret_name)"
   
-      # 3.3 – Executa o agente SCA apontando para o slug resolvido
-      - name: Run Veracode SCA scan
+      # Executa com continue-on-error em ambientes que não são prod
+      - name: Run Veracode SCA scan (não-prod)
+        if: ${{ env.ENVIRONMENT != 'prod' }}
+        continue-on-error: true
+        env:
+          SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
+        run: |
+          curl -sSL https://download.sourceclear.com/ci.sh \
+            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
+  
+      # Executa normalmente em produção
+      - name: Run Veracode SCA scan (prod - bloqueia falhas)
+        if: ${{ env.ENVIRONMENT == 'prod' }}
         env:
           SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
