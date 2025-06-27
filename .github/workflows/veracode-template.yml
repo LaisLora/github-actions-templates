@@ -329,6 +329,7 @@ jobs:
               -version "${{ github.run_id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
+              -failBuildOnPolicyFail true \
               -deleteincompletescan 2 \
               -createsandbox false
           else
