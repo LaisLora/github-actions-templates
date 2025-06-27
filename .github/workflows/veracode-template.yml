@@ -329,7 +329,7 @@ jobs:
               -version "${{ github.run_id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
-              - scantimeout 160 \
+              -scantimeout 160 \
               -deleteincompletescan 2 \
               -createsandbox false
           else
@@ -343,6 +343,7 @@ jobs:
               -createprofile true \
               -deleteincompletescan 2 \
               -createsandbox true \
+              -scantimeout 160 \
               -sandboxname "$ENVIRONMENT" \
               -debug
           fi
