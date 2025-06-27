@@ -329,7 +329,8 @@ jobs:
               -version "${{ github.run_id }}" \
               -filepath "$ARTIFACT" \
               -createprofile true \
-              -failBuildOnPolicyFail true \
+              -veracode_policy_name "${{ steps.policy-name-sub.outputs.policy_veracode_sub }}" \
+              -fail_build ${{ inputs.environment == 'prod' }} \
               -deleteincompletescan 2 \
               -createsandbox false
           else
