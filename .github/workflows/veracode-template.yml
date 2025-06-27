@@ -239,7 +239,7 @@ jobs:
             
             # Inclui a política conforme o projeto. Se não for mapeado, ele usa o default
             declare -A POLICY_MAP
-            POLICY_MAP["Verademo3"]="AFRIKA_AST"
+            POLICY_MAP["Verademo3"]="politica fraca"
             POLICY_MAP["projeto1"]="Politica-de-seguranca-Legados"
             POLICY_MAP["projeto2"]="Corporativa"
             
