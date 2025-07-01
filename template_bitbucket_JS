@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+
+# Instala utilitários necessários para consolidação e execução do wrapper
+apt-get update && apt-get install -y unzip zip openjdk-17-jre
+
+# ─────────────── Variáveis ───────────────
+BUILD_ID="${1:-$BITBUCKET_BUILD_NUMBER}"
+PROJECT_VERACODE="${PROJECT_VERACODE:-$BITBUCKET_REPO_SLUG}"
+
+echo "🏁 Iniciando Veracode CI/CD para Node.js | Build ID: $BUILD_ID"
+mkdir -p artifacts/$BUILD_ID
+
+# ─────────────── Yarn Install ───────────────
+echo "📦 Instalando dependências..."
+yarn install
+
+# ─────────────── Veracode AutoPack ───────────────
+echo "🔧 Instalando Veracode CLI..."
+curl -fsS https://tools.veracode.com/veracode-cli/install | sh
+
+echo "📦 Rodando AutoPack..."
+./veracode package \
+  --source . \
+  --type directory \
+  --output artifacts/$BUILD_ID \
+  --trust
+
+# ─────────────── Consolidar analysisPack ───────────────
+echo "🗂️ Extraindo zips e consolidando..."
+mkdir -p artifacts/$BUILD_ID/analysisPack
+find artifacts/$BUILD_ID -name "*.zip" -exec unzip -o {} -d artifacts/$BUILD_ID/analysisPack \;
+
+echo "🧱 Criando analysisPack.zip..."
+zip -r artifacts/$BUILD_ID/analysisPack.zip artifacts/$BUILD_ID/analysisPack
+
+# ─────────────── Veracode Pipeline Scan ───────────────
+echo "🛡️ Baixando Veracode Pipeline Scanner..."
+curl -O -L https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip
+unzip -o pipeline-scan-LATEST.zip
+
+echo "🔍 Executando Pipeline Scan..."
+java -jar pipeline-scan.jar \
+  -vid "$APIID_VERACODE" \
+  -vkey "$APIKEY_VERACODE" \
+  -f "artifacts/$BUILD_ID/analysisPack.zip" \
+  --issue_details true \
+  -fs "Very High,High,Medium,Low,Very Low"
+
+echo "✅ Veracode Pipeline Scan finalizado com sucesso!"
