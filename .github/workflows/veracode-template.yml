@@ -174,7 +174,7 @@ jobs:
         env:
           SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
         run: |
-          curl -sSL https://download.sourceclear.com/ci.sh \
+          curl -sSL https://sca-downloads.veracode.com/install | sh \
             | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
 
 
