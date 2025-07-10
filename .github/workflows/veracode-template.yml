@@ -170,13 +170,19 @@ jobs:
           echo "Usando workspace '$slug_value' (secret: $secret_name)"
   
       # Executa com continue-on-error em ambientes que não são prod
-      - name: Run Veracode SCA scan 
+      - name: Baixar o CLI SCA
+        run: |
+          curl -sSL https://sca-downloads.veracode.com/ci.sh | bash 
+
+      - name: Run Veracode SCA CLI
         env:
           SRCCLR_WORKSPACE_SLUG: ${{ steps.slug.outputs.slug }}
+          SRCCLR_API_TOKEN: ${{ secrets.SRCCLR_API_TOKEN }}
         run: |
-          curl -sSL https://sca-downloads.veracode.com/install | sh \
-            | bash -s -- scan --update-advisor --allow-dirty --uri-as-name --recursive
-
+          echo "🔍 Running Veracode SCA scan with srcclr CLI..."
+          ./srcclr scan --recursive --json=results-sca.json
+          echo "✅ SCA scan completed."
+          cat results-sca.json || echo "⚠️ JSON não foi gerado"
 
   # ─── Veracode Pipeline Scan (mantém policy remap intacto) ────────────────────
 
